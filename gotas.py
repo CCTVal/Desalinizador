@@ -1,9 +1,14 @@
 import numpy as np
 import cv2
 from collections import Counter
+from sys import argv
 
 # Load the image
-image_path = "DSC_0111.JPG"
+try:
+    image_path = argv[1]
+except IndexError:
+    image_path = "DSC_0111.JPG"
+    print("No image filename received. Will use default value, " + image_path)
 image = cv2.imread(image_path)
 
 # Constants
