@@ -1,0 +1,11 @@
+# Artefactos de build de PyInstaller
+build/
+dist/
+*.spec
+
+# Cache de Python
+__pycache__/
+*.pyc
+
+# Imágenes de prueba sintéticas
+test_*.jpg
