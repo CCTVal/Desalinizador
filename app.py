@@ -15,7 +15,6 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-import numpy as np
 from PIL import Image, ImageTk
 
 import matplotlib
@@ -30,6 +29,9 @@ APP_TITLE = "Análisis de tamaño de gota"
 
 # Factores de conversión a micrómetros
 UNIT_TO_UM = {"mm": 1000.0, "cm": 10000.0}
+
+# Opacidad de la pantalla de carga (0 = invisible, 1 = opaca)
+LOADING_ALPHA = 0.55
 
 
 class App(tk.Tk):
@@ -51,6 +53,11 @@ class App(tk.Tk):
         self.drops_path = None
         self.result = None
         self._photo_refs = {}
+
+        # Zoom/desplazamiento de la imagen de gotas
+        self.drops_zoom = 1.0          # 1.0 = ajustada a la ventana
+        self.drops_pan = [0.0, 0.0]    # desplazamiento en píxeles del canvas
+        self._pan_anchor = None
 
         self._build_ui()
 
@@ -229,9 +236,33 @@ class App(tk.Tk):
         left = ttk.Frame(body)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # Barra de botones de zoom
+        zoombar = ttk.Frame(left, padding=(0, 4))
+        zoombar.pack(side=tk.TOP, fill=tk.X)
+        ttk.Button(zoombar, text="Zoom +", width=8,
+                   command=lambda: self._zoom_by(1.25)).pack(side=tk.LEFT)
+        ttk.Button(zoombar, text="Zoom −", width=8,
+                   command=lambda: self._zoom_by(1 / 1.25)).pack(side=tk.LEFT,
+                                                                 padx=4)
+        ttk.Button(zoombar, text="Ajustar", width=8,
+                   command=self._reset_zoom).pack(side=tk.LEFT)
+        self.zoom_lbl = ttk.Label(zoombar, text="100%", width=6,
+                                  foreground="#666")
+        self.zoom_lbl.pack(side=tk.LEFT, padx=8)
+        ttk.Label(zoombar, foreground="#888",
+                  text="Rueda: zoom · Arrastrar: mover · Doble clic: ajustar"
+                  ).pack(side=tk.LEFT, padx=4)
+
         self.drops_canvas = tk.Canvas(left, bg="#000", highlightthickness=0)
         self.drops_canvas.pack(fill=tk.BOTH, expand=True)
         self.drops_canvas.bind("<Configure>", lambda e: self._refresh_drops_image())
+        # Zoom con la rueda, arrastrar para mover, doble clic para resetear
+        self.drops_canvas.bind("<MouseWheel>", self._on_zoom)        # Windows
+        self.drops_canvas.bind("<Button-4>", self._on_zoom)          # Linux up
+        self.drops_canvas.bind("<Button-5>", self._on_zoom)          # Linux down
+        self.drops_canvas.bind("<ButtonPress-1>", self._on_pan_start)
+        self.drops_canvas.bind("<B1-Motion>", self._on_pan_move)
+        self.drops_canvas.bind("<Double-Button-1>", lambda e: self._reset_zoom())
 
         sliders = ttk.Frame(left, padding=(0, 8))
         sliders.pack(side=tk.BOTTOM, fill=tk.X)
@@ -240,7 +271,7 @@ class App(tk.Tk):
         self.darkness_var = tk.DoubleVar(value=27.0)
         self.darkness_scale = ttk.Scale(
             sliders, from_=0, to=100, variable=self.darkness_var,
-            command=lambda e: self._on_slider_change("darkness"))
+            command=lambda e: self._update_slider_labels())
         self.darkness_scale.grid(row=1, column=0, sticky="ew", padx=(0, 10))
         self.darkness_lbl = ttk.Label(sliders, text="27%", width=6)
         self.darkness_lbl.grid(row=1, column=1)
@@ -249,11 +280,17 @@ class App(tk.Tk):
         self.focus_var = tk.DoubleVar(value=80.0)
         self.focus_scale = ttk.Scale(
             sliders, from_=0, to=100, variable=self.focus_var,
-            command=lambda e: self._on_slider_change("focus"))
+            command=lambda e: self._update_slider_labels())
         self.focus_scale.grid(row=3, column=0, sticky="ew", padx=(0, 10))
         self.focus_lbl = ttk.Label(sliders, text="80%", width=6)
         self.focus_lbl.grid(row=3, column=1)
         sliders.columnconfigure(0, weight=1)
+
+        # Analizar SOLO al soltar el slider (no en cada porcentaje intermedio)
+        self.darkness_scale.bind("<ButtonRelease-1>",
+                                 lambda e: self._on_slider_release())
+        self.focus_scale.bind("<ButtonRelease-1>",
+                              lambda e: self._on_slider_release())
 
         # Derecha: histograma + estadísticas
         right = ttk.Frame(body)
@@ -286,6 +323,8 @@ class App(tk.Tk):
             return
         self.drops_path = path
         self.drops_label.config(text=os.path.basename(path), foreground="#000")
+        self.drops_zoom = 1.0
+        self.drops_pan = [0.0, 0.0]
         if self.um_per_pixel is None:
             messagebox.showinfo(
                 "Sin calibración",
@@ -293,18 +332,21 @@ class App(tk.Tk):
                 "Para obtener µm, calibre primero en la pestaña 1.")
         self._run_analysis()
 
-    def _on_slider_change(self, which):
+    def _update_slider_labels(self):
+        """Actualiza el % en vivo mientras se arrastra (sin analizar)."""
         self.darkness_lbl.config(text=f"{self.darkness_var.get():.0f}%")
         self.focus_lbl.config(text=f"{self.focus_var.get():.0f}%")
-        # Re-analizar al soltar el slider (con debounce simple)
+
+    def _on_slider_release(self):
+        """Al soltar el slider: analiza una sola vez (no cada porcentaje)."""
+        self._update_slider_labels()
         if self.drops_path:
-            if hasattr(self, "_slider_job"):
-                self.after_cancel(self._slider_job)
-            self._slider_job = self.after(300, self._run_analysis)
+            self._run_analysis()
 
     def _run_analysis(self):
         if not self.drops_path:
             return
+        self._show_loading("Analizando…")
         self.status.config(text="Analizando…")
         darkness = self.darkness_var.get()
         focus = self.focus_var.get()
@@ -319,6 +361,7 @@ class App(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_analysis_done(self, res):
+        self._hide_loading()
         if not res.get("ok"):
             messagebox.showerror("Error", res.get("error", "Error desconocido"))
             self.status.config(text="Error en el análisis.")
@@ -348,13 +391,77 @@ class App(tk.Tk):
             return
         img = Image.fromarray(arr)
         iw, ih = img.size
-        scale = min(cw / iw, ch / ih)
-        new_size = (max(int(iw * scale), 1), max(int(ih * scale), 1))
+        base = min(cw / iw, ch / ih)          # escala de ajuste a la ventana
+        scale = base * self.drops_zoom        # escala efectiva con zoom
+        dw, dh = iw * scale, ih * scale
+
+        # Limitar el desplazamiento para que la imagen nunca deje hueco vacío:
+        # si es más grande que el canvas, solo se puede mover hasta tocar el
+        # borde; si es más pequeña, queda centrada.
+        lim_x = max(0.0, (dw - cw) / 2)
+        lim_y = max(0.0, (dh - ch) / 2)
+        self.drops_pan[0] = max(-lim_x, min(lim_x, self.drops_pan[0]))
+        self.drops_pan[1] = max(-lim_y, min(lim_y, self.drops_pan[1]))
+
+        new_size = (max(int(dw), 1), max(int(dh), 1))
         img = img.resize(new_size, Image.LANCZOS)
         photo = ImageTk.PhotoImage(img)
         self._photo_refs["drops"] = photo
         canvas.delete("all")
-        canvas.create_image(cw // 2, ch // 2, image=photo, anchor=tk.CENTER)
+        cx = cw / 2 + self.drops_pan[0]
+        cy = ch / 2 + self.drops_pan[1]
+        canvas.create_image(cx, cy, image=photo, anchor=tk.CENTER)
+        if hasattr(self, "zoom_lbl"):
+            self.zoom_lbl.config(text=f"{self.drops_zoom * 100:.0f}%")
+
+    def _reset_zoom(self):
+        self.drops_zoom = 1.0
+        self.drops_pan = [0.0, 0.0]
+        self._refresh_drops_image()
+
+    def _apply_zoom(self, new_zoom, pivot_x, pivot_y):
+        """Cambia el zoom manteniendo fijo el punto (pivot) indicado."""
+        new_zoom = min(40.0, max(1.0, new_zoom))
+        if new_zoom == self.drops_zoom:
+            return
+        cw = max(self.drops_canvas.winfo_width(), 1)
+        ch = max(self.drops_canvas.winfo_height(), 1)
+        cx = cw / 2 + self.drops_pan[0]
+        cy = ch / 2 + self.drops_pan[1]
+        ratio = new_zoom / self.drops_zoom
+        self.drops_pan[0] = (cx + (cx - pivot_x) * (ratio - 1)) - cw / 2
+        self.drops_pan[1] = (cy + (cy - pivot_y) * (ratio - 1)) - ch / 2
+        self.drops_zoom = new_zoom
+        self._refresh_drops_image()
+
+    def _zoom_by(self, factor):
+        """Zoom desde un botón, centrado en el medio de la imagen."""
+        if not self.result:
+            return
+        cw = max(self.drops_canvas.winfo_width(), 1)
+        ch = max(self.drops_canvas.winfo_height(), 1)
+        self._apply_zoom(self.drops_zoom * factor, cw / 2, ch / 2)
+
+    def _on_zoom(self, event):
+        if not self.result:
+            return
+        # Dirección de la rueda (Windows usa event.delta; Linux usa num 4/5)
+        if getattr(event, "num", None) == 5 or getattr(event, "delta", 0) < 0:
+            factor = 1 / 1.1
+        else:
+            factor = 1.1
+        self._apply_zoom(self.drops_zoom * factor, event.x, event.y)
+
+    def _on_pan_start(self, event):
+        self._pan_anchor = (event.x, event.y, self.drops_pan[0], self.drops_pan[1])
+
+    def _on_pan_move(self, event):
+        if not self._pan_anchor or not self.result:
+            return
+        x0, y0, p0x, p0y = self._pan_anchor
+        self.drops_pan[0] = p0x + (event.x - x0)
+        self.drops_pan[1] = p0y + (event.y - y0)
+        self._refresh_drops_image()  # _refresh aplica el límite del desplazamiento
 
     def _refresh_chart(self):
         self._reset_axes()
@@ -373,6 +480,70 @@ class App(tk.Tk):
                          color="#999", fontsize=14)
         self.fig.tight_layout()
         self.chart_canvas.draw()
+
+    # ----------------------------------------------------- pantalla de carga
+    def _show_loading(self, text="Cargando…"):
+        """Pantalla de carga con fondo SEMITRANSPARENTE (atenúa la app sin
+        quedar en negro) y una tarjeta OPACA al centro con el logo y la barra.
+        Se usan dos ventanas: el atenuador con LOADING_ALPHA y la tarjeta sin
+        transparencia, para que el logo y la barra se vean nítidos."""
+        if getattr(self, "_dimmer", None) is None or \
+                not self._dimmer.winfo_exists():
+            # 1) Atenuador semitransparente (solo oscurece el fondo)
+            self._dimmer = tk.Toplevel(self)
+            self._dimmer.overrideredirect(True)
+            self._dimmer.transient(self)
+            try:
+                self._dimmer.attributes("-alpha", LOADING_ALPHA)
+            except tk.TclError:
+                pass
+            self._dimmer.configure(bg="#000000")
+
+            # 2) Tarjeta opaca con el contenido
+            self._loading = tk.Toplevel(self)
+            self._loading.overrideredirect(True)
+            self._loading.transient(self)
+            self._loading.configure(bg="#1e1e1e",
+                                    highlightbackground="#444",
+                                    highlightthickness=1)
+            tk.Label(self._loading, text="⏳", fg="white", bg="#1e1e1e",
+                     font=("Segoe UI", 28)).pack(padx=30, pady=(18, 4))
+            self._loading_lbl = tk.Label(self._loading, text=text, fg="white",
+                                         bg="#1e1e1e",
+                                         font=("Segoe UI", 14, "bold"))
+            self._loading_lbl.pack()
+            self._loading_pb = ttk.Progressbar(self._loading,
+                                               mode="indeterminate", length=240)
+            self._loading_pb.pack(padx=30, pady=(12, 20))
+
+        self._loading_lbl.config(text=text)
+        self.update_idletasks()
+        x, y = self.winfo_rootx(), self.winfo_rooty()
+        w, h = self.winfo_width(), self.winfo_height()
+
+        # Atenuador cubre toda la ventana
+        self._dimmer.geometry(f"{w}x{h}+{x}+{y}")
+        self._dimmer.deiconify()
+        self._dimmer.lift()
+
+        # Tarjeta centrada y por encima del atenuador
+        self._loading.deiconify()
+        self._loading.update_idletasks()
+        cw_, ch_ = self._loading.winfo_width(), self._loading.winfo_height()
+        self._loading.geometry(
+            f"+{x + (w - cw_) // 2}+{y + (h - ch_) // 2}")
+        self._loading.lift()
+        self._loading_pb.start(12)
+        self.update_idletasks()
+
+    def _hide_loading(self):
+        if getattr(self, "_loading", None) is not None and \
+                self._loading.winfo_exists():
+            self._loading_pb.stop()
+            self._loading.withdraw()
+        if getattr(self, "_dimmer", None) is not None and \
+                self._dimmer.winfo_exists():
+            self._dimmer.withdraw()
 
 
 def main():

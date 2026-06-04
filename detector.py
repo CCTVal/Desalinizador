@@ -227,7 +227,7 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
                   um_per_pixel=None,
                   min_area=5, max_area=1000,
                   min_aspect=0.5, max_aspect=5.0,
-                  min_core_ratio=0.9):
+                  min_circularity=0.8):
     """
     Analiza una imagen y detecta las gotas (círculos negros difusos).
 
@@ -235,13 +235,14 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
         image_path: ruta del archivo de imagen.
         darkness_pct: "Oscuridad" (0-100). Define el umbral de negro;
             valores más altos consideran más píxeles como oscuros.
-        focus_pct: "Enfoque" (0-100). Mapea la circularidad mínima exigida;
-            valores más altos exigen gotas más circulares/nítidas.
+        focus_pct: "Enfoque" (0-100). Mapea min_core_ratio: la proporción mínima
+            de píxeles "core" (bien oscuros/enfocados) dentro del contorno;
+            valores más altos exigen gotas más sólidas/nítidas.
         um_per_pixel: micrómetros por píxel (de la calibración). Si es None,
             los tamaños se entregan en píxeles.
         min_area, max_area: filtro de área del contorno (px).
         min_aspect, max_aspect: filtro de relación de aspecto.
-        min_core_ratio: proporción mínima de píxeles "core" dentro del contorno.
+        min_circularity: circularidad mínima exigida (1 = círculo perfecto).
 
     Devuelve un diccionario (ver claves al final de la función).
     """
@@ -256,7 +257,8 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
     # El borde se considera un poco más claro que el núcleo (mismo gap que el
     # script original: 36% - 27% = 9%).
     border_darkness_threshold = min((darkness_pct + 9.0) * 2.55, 255)
-    min_circularity = focus_pct / 100.0
+    # "Enfoque" controla qué tan sólido/oscuro debe estar el núcleo de la gota.
+    min_core_ratio = focus_pct / 100.0
 
     # Escala de grises + desenfoque para suavizar
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
