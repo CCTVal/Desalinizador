@@ -107,7 +107,9 @@ Función: `analyze_image(image_path, darkness_pct, focus_pct, um_per_pixel, ...)
 2. **Umbralización inversa** (`THRESH_BINARY_INV`): los píxeles oscuros quedan
    en blanco. Se generan dos máscaras: `core_thresh` (con `black_threshold`) y
    `border_thresh` (con `border_darkness_threshold`).
-3. **Contornos** sobre `core_thresh` (`findContours`, `RETR_LIST`).
+3. **Contornos** sobre `border_thresh` (`findContours`, `RETR_LIST`), para
+   medir el ancho completo de la gota. `core_thresh` se usa después para
+   validar qué proporción del contorno corresponde al núcleo oscuro.
 4. Para cada contorno se calcula y se **filtra**:
    - **Área**: `area = cv2.contourArea`, debe cumplir `min_area < area < max_area`.
    - **Bounding box** `(x, y, w, h)` y relación de aspecto `aspect = w/h`,

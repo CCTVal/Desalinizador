@@ -41,7 +41,7 @@ else:
     # Find contours on the border thresholded image
     # cv2.RETR_EXTERNAL retrieves only the extreme outer contours
     # cv2.CHAIN_APPROX_SIMPLE compresses horizontal, vertical, and diagonal segments
-    contours, _ = cv2.findContours(core_thresh.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(border_thresh.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     detected_circles_info = []
     output_image = image.copy() # Image to draw boxes with data
@@ -111,7 +111,7 @@ else:
         })
 
         # --- Visualization for selected spots ---
-        core = np.logical_and(core_thresh == 255, masked_core_pixels == 255)
+        core = np.logical_and(core_thresh == 255, mask == 255)
         debug_image[core] = red_color
         # Wanted to paint both the core pixel and the gray pixels, but I still don't know why does it not work.
         #border = np.logical_and(border_thresh == 255, mask == 255)

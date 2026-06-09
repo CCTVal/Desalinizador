@@ -16,6 +16,17 @@ RED_COLOR = (0, 0, 255)
 GREEN_COLOR = (0, 255, 0)
 
 
+def _imread(image_path, flags=cv2.IMREAD_COLOR):
+    """Lee imagenes con rutas Windows no ASCII usando imdecode."""
+    try:
+        data = np.fromfile(image_path, dtype=np.uint8)
+    except OSError:
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, flags)
+
+
 def _smooth(profile, k):
     """Suavizado por media móvil (sin dependencias externas)."""
     if k < 1:
@@ -48,8 +59,6 @@ def _analyze_band(strip):
     if energy < 1e-6:
         return None
 
-    # Autocorrelación vía FFT (O(n log n)): permite una búsqueda de ángulo
-    # amplia sin penalizar el rendimiento.
     m = 1 << int(np.ceil(np.log2(2 * n)))
     F = np.fft.rfft(detr, m)
     ac = np.fft.irfft(F * np.conj(F), m)[:n]
@@ -62,7 +71,13 @@ def _analyze_band(strip):
     local = _find_peaks(seg)
     if not local:
         return None
-    best_lag = max(local, key=lambda i: seg[i])
+    max_peak = max(float(seg[i]) for i in local)
+    if not np.isfinite(max_peak) or max_peak <= 0:
+        return None
+    strong = [i for i in local if seg[i] >= 0.75 * max_peak]
+    if not strong:
+        return None
+    best_lag = min(strong)
     period = best_lag + lag_min
     confidence = float(seg[best_lag])
     # El score prioriza bandas periódicas Y con contraste (las marcas reales),
@@ -141,7 +156,7 @@ def detect_ruler_spacing(image_path, max_dim=1400):
     Devuelve un diccionario con: ok, error, spacing_px, orientation,
     tick_segments (en coords de la imagen original), confidence, angle_deg.
     """
-    gray0 = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    gray0 = _imread(image_path, cv2.IMREAD_GRAYSCALE)
     if gray0 is None:
         return {"ok": False, "error": f"No se pudo cargar la imagen: {image_path}"}
 
@@ -153,8 +168,6 @@ def detect_ruler_spacing(image_path, max_dim=1400):
     else:
         gray, f = gray0.copy(), 1.0
 
-    # Normalización de brillo para fotos oscuras/subexpuestas: estira el
-    # histograma a 0-255 antes del realce local (CLAHE).
     gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     gray = clahe.apply(gray).astype(np.float32)
@@ -164,12 +177,9 @@ def detect_ruler_spacing(image_path, max_dim=1400):
     best = None
     for orientation in ("vertical", "horizontal"):
         length, perp = (h, w) if orientation == "vertical" else (w, h)
-        # Bandas estrechas: las marcas (ticks) son cortas; una banda angosta
-        # situada sobre ellas da una señal periódica limpia, sin mezclar el
-        # borde de la regla, los números ni la zona vacía.
         band_w = max(30, perp // 20)
         step = max(10, band_w // 2)
-        for sh in np.arange(-0.6, 0.601, 0.04):  # ~ ±31°
+        for sh in np.arange(-0.6, 0.601, 0.04):
             warped = cv2.warpAffine(gray, _shear_matrix(orientation, sh),
                                     (w, h), flags=cv2.INTER_LINEAR,
                                     borderMode=cv2.BORDER_REPLICATE)
@@ -207,15 +217,14 @@ def detect_ruler_spacing(image_path, max_dim=1400):
 
     detr, period = best_res["detr"], best_res["period"]
     ticks, spacing, regularity = _refine_ticks(detr, period)
+    if regularity > 0.9 and period > 0 and abs(spacing - period) / period <= 0.08:
+        spacing = float(period)
 
     # Confianza: la regularidad real de las marcas (más intuitiva) reforzada
     # por la autocorrelación.
     confidence = max(regularity, best_res["confidence"]) if ticks else \
         best_res["confidence"]
 
-    # Corrección por inclinación: el perfil cizallado mide la separación
-    # proyectada sobre el eje (d/cos α). La separación real entre marcas es
-    # d_real = d_medida · cos(α), con cos(α) = 1/sqrt(1+sh²).
     sh = best_sh
     cos_a = 1.0 / np.sqrt(1.0 + sh * sh)
     spacing_real = spacing * cos_a
@@ -264,7 +273,7 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
 
     Devuelve un diccionario (ver claves al final de la función).
     """
-    image = cv2.imread(image_path)
+    image = _imread(image_path)
     if image is None:
         return {"ok": False, "error": f"No se pudo cargar la imagen: {image_path}"}
 
@@ -289,7 +298,7 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
         blurred, black_threshold, 255, cv2.THRESH_BINARY_INV)
 
     contours, _ = cv2.findContours(
-        core_thresh.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        border_thresh.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     detected_circles_info = []
     output_image = image.copy()  # imagen con cajas y datos
@@ -317,9 +326,13 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
             continue
 
         # 4. Chequeo del núcleo (core) con el umbral más estricto
-        mask = np.zeros(gray.shape, dtype=np.uint8)
-        cv2.drawContours(mask, [contour], -1, 255, -1)
-        masked_core_pixels = cv2.bitwise_and(core_thresh, mask)
+        mask = np.zeros((h, w), dtype=np.uint8)
+        contour_roi = contour.copy()
+        contour_roi[:, 0, 0] -= x
+        contour_roi[:, 0, 1] -= y
+        cv2.drawContours(mask, [contour_roi], -1, 255, -1)
+        core_roi = core_thresh[y:y + h, x:x + w]
+        masked_core_pixels = cv2.bitwise_and(core_roi, mask)
         core_pixel_count = cv2.countNonZero(masked_core_pixels)
         core_ratio = core_pixel_count / area if area != 0 else 0
         if core_ratio < min_core_ratio:
@@ -332,8 +345,9 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
             "bounding_box": (x, y, w, h),
         })
 
-        core = np.logical_and(core_thresh == 255, masked_core_pixels == 255)
-        debug_image[core] = RED_COLOR
+        core = np.logical_and(core_roi == 255, mask == 255)
+        debug_roi = debug_image[y:y + h, x:x + w]
+        debug_roi[core] = RED_COLOR
 
         cv2.rectangle(output_image, (x, y), (x + w, y + h), GREEN_COLOR, 2)
         cv2.putText(output_image, f"W: {w}", (x, y - 5),
@@ -344,7 +358,7 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
     # Conversión a micrómetros si hay calibración
     if um_per_pixel:
         widths = [w * um_per_pixel for w in widths_px]
-        unit = "µm"
+        unit = "\u00b5m"
     else:
         widths = list(widths_px)
         unit = "px"
