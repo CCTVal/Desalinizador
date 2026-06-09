@@ -106,11 +106,12 @@ class App(tk.Tk):
         ttk.Button(top, text="Detectar de nuevo",
                    command=self.auto_calibrate).pack(side=tk.LEFT, padx=8)
 
-        ttk.Label(self.tab_calib, padding=(10, 0), foreground="#555",
-                  text="Suba la foto de la regla: la separación entre marcas se "
-                       "detecta automáticamente. Solo indique cuánto vale una "
-                       "división y la escala se calcula sola.").pack(
-            side=tk.TOP, anchor=tk.W)
+        self.calib_hint = ttk.Label(
+            self.tab_calib, padding=(10, 0), foreground="#555",
+            text="Suba la foto de la regla: la separación entre marcas se "
+                 "detecta automáticamente. Solo indique cuánto vale una "
+                 "división y la escala se calcula sola.")
+        self.calib_hint.pack(side=tk.TOP, anchor=tk.W)
 
         self.calib_canvas = tk.Canvas(self.tab_calib, bg="#222",
                                       highlightthickness=0)
@@ -133,9 +134,9 @@ class App(tk.Tk):
         try:
             self.ref_image = Image.open(path).convert("RGB")
             self.ref_path = path
-            self.status.config(text=f"Referencia cargada: {os.path.basename(path)}. "
-                                "Detectando marcas…")
             self._show_reference()
+            self.status.config(text=f"Referencia cargada: "
+                               f"{os.path.basename(path)}. Detectando marcas…")
             self.auto_calibrate()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la imagen:\n{e}")

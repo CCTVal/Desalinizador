@@ -48,8 +48,14 @@ def _analyze_band(strip):
     if energy < 1e-6:
         return None
 
-    ac = np.correlate(detr, detr, mode="full")[n - 1:]
-    ac /= ac[0]
+    # Autocorrelación vía FFT (O(n log n)): permite una búsqueda de ángulo
+    # amplia sin penalizar el rendimiento.
+    m = 1 << int(np.ceil(np.log2(2 * n)))
+    F = np.fft.rfft(detr, m)
+    ac = np.fft.irfft(F * np.conj(F), m)[:n]
+    if ac[0] <= 0:
+        return None
+    ac = ac / ac[0]
     lag_min = 4
     lag_max = max(lag_min + 1, n // 4)
     seg = ac[lag_min:lag_max]
@@ -116,7 +122,7 @@ def _refine_ticks(detr, period):
     return ticks, spacing, regularity
 
 
-def detect_ruler_spacing(image_path, max_dim=900):
+def detect_ruler_spacing(image_path, max_dim=1400):
     """
     Detecta automáticamente la separación (en píxeles) entre las marcas de
     una regla, usando la periodicidad de las líneas de la imagen.
@@ -147,7 +153,10 @@ def detect_ruler_spacing(image_path, max_dim=900):
     else:
         gray, f = gray0.copy(), 1.0
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    # Normalización de brillo para fotos oscuras/subexpuestas: estira el
+    # histograma a 0-255 antes del realce local (CLAHE).
+    gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     gray = clahe.apply(gray).astype(np.float32)
     h, w = gray.shape
 
@@ -155,9 +164,12 @@ def detect_ruler_spacing(image_path, max_dim=900):
     best = None
     for orientation in ("vertical", "horizontal"):
         length, perp = (h, w) if orientation == "vertical" else (w, h)
-        band_w = max(30, perp // 6)
-        step = max(15, band_w // 2)
-        for sh in np.arange(-0.16, 0.161, 0.02):  # ~ ±9°
+        # Bandas estrechas: las marcas (ticks) son cortas; una banda angosta
+        # situada sobre ellas da una señal periódica limpia, sin mezclar el
+        # borde de la regla, los números ni la zona vacía.
+        band_w = max(30, perp // 20)
+        step = max(10, band_w // 2)
+        for sh in np.arange(-0.6, 0.601, 0.04):  # ~ ±31°
             warped = cv2.warpAffine(gray, _shear_matrix(orientation, sh),
                                     (w, h), flags=cv2.INTER_LINEAR,
                                     borderMode=cv2.BORDER_REPLICATE)
@@ -183,7 +195,7 @@ def detect_ruler_spacing(image_path, max_dim=900):
 
     # --- Refinamiento fino del ángulo en la banda elegida ---
     best_sh, best_res = best["sh"], None
-    for sh in np.arange(best["sh"] - 0.02, best["sh"] + 0.0201, 0.005):
+    for sh in np.arange(best["sh"] - 0.04, best["sh"] + 0.0401, 0.008):
         res = _analyze_band(_band_strip(gray, orientation, sh, b0, b1))
         if res is None:
             continue
@@ -201,8 +213,14 @@ def detect_ruler_spacing(image_path, max_dim=900):
     confidence = max(regularity, best_res["confidence"]) if ticks else \
         best_res["confidence"]
 
-    # Segmentos en coordenadas de la imagen ORIGINAL (deshace shear y escala)
+    # Corrección por inclinación: el perfil cizallado mide la separación
+    # proyectada sobre el eje (d/cos α). La separación real entre marcas es
+    # d_real = d_medida · cos(α), con cos(α) = 1/sqrt(1+sh²).
     sh = best_sh
+    cos_a = 1.0 / np.sqrt(1.0 + sh * sh)
+    spacing_real = spacing * cos_a
+
+    # Segmentos en coordenadas de la imagen ORIGINAL (deshace shear y escala)
     segments = []
     for t in ticks:
         if orientation == "vertical":
@@ -215,7 +233,7 @@ def detect_ruler_spacing(image_path, max_dim=900):
     return {
         "ok": True,
         "error": None,
-        "spacing_px": spacing / f,
+        "spacing_px": spacing_real / f,
         "orientation": orientation,
         "tick_segments": segments,
         "confidence": float(confidence),
