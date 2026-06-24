@@ -58,8 +58,10 @@ echo.
 echo Generando ejecutable...
 %PYTHON_CMD% -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name "DesalinizadorGotas" ^
+  --icon "assets\cctval_icon.ico" ^
   --hidden-import "matplotlib.backends.backend_tkagg" ^
   --collect-data matplotlib ^
+  --add-data "assets;assets" ^
   --exclude-module PyQt5 ^
   --exclude-module PyQt6 ^
   --exclude-module PySide2 ^
