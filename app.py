@@ -21,13 +21,6 @@ from tkinter import filedialog, messagebox
 import numpy as np
 from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageFilter
 
-import matplotlib
-matplotlib.use("TkAgg")
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-
-from detector import analyze_image, detect_ruler_spacing
-
 # Arrastrar-y-soltar opcional (si tkinterdnd2 está instalado).
 try:
     from tkinterdnd2 import TkinterDnD, DND_FILES
@@ -63,6 +56,37 @@ CARD_GAP = 26
 FILETYPES = [("Imágenes", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"),
              ("Todos los archivos", "*.*")]
 
+_MPL_CACHE = None
+
+
+def _matplotlib_tk():
+    """Carga matplotlib solo cuando se abre la pantalla de resultados."""
+    global _MPL_CACHE
+    if _MPL_CACHE is None:
+        import matplotlib
+        matplotlib.use("TkAgg")
+        try:
+            import matplotlib.font_manager as fm
+            for p in _font_paths():
+                fm.fontManager.addfont(p)
+            matplotlib.rcParams["font.family"] = FONT
+        except Exception:
+            pass
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        _MPL_CACHE = (Figure, FigureCanvasTkAgg)
+    return _MPL_CACHE
+
+
+def _detect_ruler_spacing(*args, **kwargs):
+    from detector import detect_ruler_spacing
+    return detect_ruler_spacing(*args, **kwargs)
+
+
+def _analyze_image(*args, **kwargs):
+    from detector import analyze_image
+    return analyze_image(*args, **kwargs)
+
 
 def resource_path(name):
     """Ruta de un recurso, compatible con el .exe de PyInstaller."""
@@ -81,12 +105,16 @@ _POPPINS = {
 }
 
 
+def _font_paths():
+    return [os.path.join(_FONT_DIR, f) for f in _POPPINS.values()
+            if os.path.exists(os.path.join(_FONT_DIR, f))]
+
+
 def load_fonts():
     """Carga Poppins de forma privada al proceso (Windows) y la registra en
     matplotlib. Ajusta FONT a 'Poppins' si lo logra; si no, deja 'Segoe UI'."""
     global FONT
-    paths = [os.path.join(_FONT_DIR, f) for f in _POPPINS.values()]
-    paths = [p for p in paths if os.path.exists(p)]
+    paths = _font_paths()
     if not paths:
         return FONT
     ok = False
@@ -96,13 +124,6 @@ def load_fonts():
             if ctypes.windll.gdi32.AddFontResourceExW(ctypes.c_wchar_p(p),
                                                       0x10, 0):
                 ok = True
-    try:
-        import matplotlib.font_manager as fm
-        for p in paths:
-            fm.fontManager.addfont(p)
-        matplotlib.rcParams["font.family"] = "Poppins"
-    except Exception:
-        pass
     if ok:
         FONT = "Poppins"
     return FONT
@@ -551,11 +572,11 @@ _Base = TkinterDnD.Tk if _HAS_DND else tk.Tk
 class App(_Base):
     def __init__(self):
         super().__init__()
+        self.withdraw()
         load_fonts()
         self.title("CCTVal · " + APP_TITLE)
         self._set_window_icon()
-        self.geometry("1300x860")
-        self.minsize(1140, 760)
+        self._set_initial_geometry()
         self.configure(bg="#10268f")
 
         self.calib_path = None
@@ -581,7 +602,9 @@ class App(_Base):
 
         self._card_cache = {}
         self._loading = None
+        self._switching = False
         self._screen = "calibration"
+        self._compact_results = False
         # Dos versiones del logo: grande/bajo para pantallas con cabecera libre,
         # y compacto/arriba para resultados (su tarjeta ocupa casi toda la altura).
         self._brand_big = self._load_brand(100)
@@ -589,17 +612,37 @@ class App(_Base):
         self._brand = self._brand_big
         self.bg = tk.Canvas(self, highlightthickness=0)
         self.bg.pack(fill=tk.BOTH, expand=True)
+        self._scrollable = False
+        self.bind_all("<MouseWheel>", self._on_page_wheel)
+        self.bind_all("<Button-4>", self._on_page_wheel)
+        self.bind_all("<Button-5>", self._on_page_wheel)
         self.bind("<Configure>", lambda e: self._relayout())
         self.show_calibration()
+        self.update_idletasks()
+        self.deiconify()
 
     # --------------------------------------------------------- fondo / layout
+    def _set_initial_geometry(self):
+        """Ajusta la ventana al monitor para evitar que parta cortada."""
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        w = max(980, min(1300, sw - 80))
+        h = max(620, min(860, sh - 90))
+        x = max((sw - w) // 2, 0)
+        y = max((sh - h) // 2, 0)
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        self.minsize(min(980, max(sw - 80, 760)),
+                     min(620, max(sh - 120, 520)))
+
     def _relayout(self, event=None):
+        if getattr(self, "_switching", False):
+            return
         W, H = self.winfo_width(), self.winfo_height()
         if W <= 1 or H <= 1:
             return
-        self._paint_gradient(W, H)
+        self._resize_result_widgets(W, H)
         self._draw_header(W)
         if not self._cards:
+            self._paint_gradient(W, H)
             return
         self.bg.delete("cardbg")
         self.bg.update_idletasks()
@@ -607,30 +650,46 @@ class App(_Base):
                  for c in self._cards]
         widths = [w + 2 * CARD_PAD for (w, h) in sizes]
         total = sum(widths) + CARD_GAP * (len(self._cards) - 1)
-        x = (W - total) / 2
-        max_h = max(h + 2 * CARD_PAD for (w, h) in sizes)
-        y0 = max(HEADER_H + (H - HEADER_H - max_h) / 2, HEADER_H - 20)
+        stack = len(self._cards) > 1 and total > W - 40
+        if stack:
+            content_h = sum(h + 2 * CARD_PAD for (w, h) in sizes) + \
+                CARD_GAP * (len(self._cards) - 1)
+        else:
+            content_h = max(h + 2 * CARD_PAD for (w, h) in sizes)
+        header_h = 120 if self._screen == "results" else HEADER_H
+        bottom_gap = 34 if self._screen == "results" else CARD_MARGIN * 2
+        y0 = max(header_h + (H - header_h - content_h - bottom_gap) / 2,
+                 header_h - 20)
+        scroll_h = max(H, int(y0 + content_h + CARD_MARGIN * 2))
+        self._paint_gradient(W, scroll_h)
 
         rects = []
+        x = (W - total) / 2 if not stack else None
+        y = y0
         for c, (w, h), cw in zip(self._cards, sizes, widths):
             ch = h + 2 * CARD_PAD
+            if stack:
+                x = max((W - cw) / 2, CARD_MARGIN)
             # Tarjeta como imagen PIL: esquinas suaves + sombra difuminada.
             key = (cw, ch)
             img = self._card_cache.get(key)
             if img is None:
                 img = ImageTk.PhotoImage(_make_card(cw, ch))
                 self._card_cache[key] = img
-            self.bg.create_image(x - CARD_MARGIN, y0 - CARD_MARGIN,
+            self.bg.create_image(x - CARD_MARGIN, y - CARD_MARGIN,
                                  anchor=tk.NW, image=img, tags="cardbg")
             self.bg.itemconfigure(c["win"], anchor="center")
             self.bg.coords(c["win"], x + CARD_PAD + w / 2,
-                           y0 + CARD_PAD + h / 2)
+                           y + CARD_PAD + h / 2)
             self.bg.tag_raise(c["win"])
-            rects.append((x, y0, cw, ch))
-            x += cw + CARD_GAP
+            rects.append((x, y, cw, ch))
+            if stack:
+                y += ch + CARD_GAP
+            else:
+                x += cw + CARD_GAP
 
         # Línea conectora entre la tarjeta principal y la de ejemplo.
-        if len(rects) == 2:
+        if len(rects) == 2 and not stack:
             x0, y0a, cw0, _ = rects[0]
             x1, y1a, _, _ = rects[1]
             sx, sy = x0 + cw0, y0a + CARD_PAD + 52
@@ -639,6 +698,14 @@ class App(_Base):
                                 tags="cardbg")
             self.bg.tag_lower("cardbg")
             self.bg.tag_lower("grad")
+        else:
+            self.bg.tag_lower("cardbg")
+            self.bg.tag_lower("grad")
+
+        self._scrollable = scroll_h > H + 2
+        self.bg.configure(scrollregion=(0, 0, W, scroll_h))
+        if not self._scrollable:
+            self.bg.yview_moveto(0)
 
     def _paint_gradient(self, W, H):
         if (W, H) != self._bg_size:
@@ -648,6 +715,49 @@ class App(_Base):
             self.bg.create_image(0, 0, anchor=tk.NW, image=self._photo["grad"],
                                  tags="grad")
             self.bg.tag_lower("grad")
+
+    def _on_page_wheel(self, event):
+        if not self._scrollable:
+            return
+        if getattr(self, "drops_canvas", None) is not None and \
+                event.widget is self.drops_canvas:
+            return
+        if getattr(event, "num", None) == 4:
+            units = -3
+        elif getattr(event, "num", None) == 5:
+            units = 3
+        else:
+            units = -1 * int(event.delta / 120) * 3
+        self.bg.yview_scroll(units, "units")
+
+    def _resize_result_widgets(self, W, H):
+        if self._screen != "results" or not hasattr(self, "drops_canvas"):
+            return
+        compact = H < 820
+        if compact != self._compact_results:
+            self._compact_results = compact
+            if getattr(self, "result_help_lbl", None) is not None:
+                if compact:
+                    self.result_help_lbl.pack_forget()
+                else:
+                    self.result_help_lbl.pack(anchor=tk.W, pady=(4, 0))
+            if self.result and hasattr(self, "stats_box"):
+                self._refresh_stats()
+        canvas_w = max(340, min(520, int(W * 0.38)))
+        canvas_h = max(180, min(360, H - 440))
+        if int(self.drops_canvas.cget("width")) != canvas_w or \
+                int(self.drops_canvas.cget("height")) != canvas_h:
+            self.drops_canvas.configure(width=canvas_w, height=canvas_h)
+            self._refresh_drops_image()
+        if hasattr(self, "fig"):
+            fig_w = max(3.2, min(4.8, (W - canvas_w - 220) / 105))
+            fig_h = max(2.1, min(3.35, canvas_h / 105))
+            self.fig.set_size_inches(fig_w, fig_h, forward=True)
+            if hasattr(self, "chart_widget"):
+                self.chart_widget.configure(width=int(fig_w * 100),
+                                            height=int(fig_h * 100))
+            if self.result and hasattr(self, "chart_canvas"):
+                self._refresh_chart()
 
     def _set_window_icon(self):
         """Ícono de la ventana/barra de tareas con el logo de CCTVal."""
@@ -719,6 +829,20 @@ class App(_Base):
         self.update_idletasks()
         self._relayout()
 
+    def _switch_screen(self, build):
+        """Construye una pantalla fuera de vista y la muestra ya estabilizada."""
+        self._switching = True
+        try:
+            self.bg.configure(takefocus=0)
+            self.bg.pack_forget()
+            build()
+            self.update_idletasks()
+        finally:
+            self.bg.pack(fill=tk.BOTH, expand=True)
+            self._switching = False
+        self._relayout()
+        self.update_idletasks()
+
     def _card_title(self, parent, subtitle):
         row = tk.Frame(parent, bg=CARD)
         row.pack(fill=tk.X, anchor=tk.W)
@@ -750,50 +874,53 @@ class App(_Base):
 
     # ============================================================ PANTALLA 1
     def show_calibration(self):
-        self._screen = "calibration"
-        self._clear_cards()
-        card = self._new_card()
-        self._card_title(card, "Selecciona la imagen de calibración")
-        DropZone(card, self._on_calib_file, width=420).pack(
-            fill=tk.X, pady=(16, 10))
-        self.calib_chip = tk.Frame(card, bg=CARD)
-        self.calib_chip.pack(fill=tk.X)
+        def build():
+            self._screen = "calibration"
+            self._clear_cards()
+            card = self._new_card()
+            self._card_title(card, "Selecciona la imagen de calibración")
+            DropZone(card, self._on_calib_file, width=420).pack(
+                fill=tk.X, pady=(16, 10))
+            self.calib_chip = tk.Frame(card, bg=CARD)
+            self.calib_chip.pack(fill=tk.X)
 
-        btns = tk.Frame(card, bg=CARD)
-        btns.pack(fill=tk.X, pady=(22, 2))
-        RoundButton(btns, "Subir", command=self._submit_calibration,
-                    kind="primary").pack(side=tk.RIGHT)
-        RoundButton(btns, "Cancelar", command=self._clear_calib_file,
-                    kind="ghost").pack(side=tk.RIGHT, padx=10)
+            btns = tk.Frame(card, bg=CARD)
+            btns.pack(fill=tk.X, pady=(22, 2))
+            RoundButton(btns, "Subir", command=self._submit_calibration,
+                        kind="primary").pack(side=tk.RIGHT)
+            RoundButton(btns, "Cancelar", command=self._clear_calib_file,
+                        kind="ghost").pack(side=tk.RIGHT, padx=10)
 
-        # tarjeta lateral: ejemplo
-        side = self._new_card()
-        head = tk.Frame(side, bg=CARD)
-        head.pack(anchor=tk.W)
-        gear_icon(head).pack(side=tk.LEFT, padx=(0, 6))
-        tk.Label(head, text="Ejemplo de imagen correcta", bg=CARD,
-                 fg=HEAD_BLUE, font=(FONT, 10, "bold")).pack(side=tk.LEFT)
+            # tarjeta lateral: ejemplo
+            side = self._new_card()
+            head = tk.Frame(side, bg=CARD)
+            head.pack(anchor=tk.W)
+            gear_icon(head).pack(side=tk.LEFT, padx=(0, 6))
+            tk.Label(head, text="Ejemplo de imagen correcta", bg=CARD,
+                     fg=HEAD_BLUE, font=(FONT, 10, "bold")).pack(side=tk.LEFT)
 
-        ex = self._example_image(300, 180)
-        holder = tk.Label(side, bg="#dfe3ea")
-        if ex is not None:
-            self._photo["example"] = ex
-            holder.configure(image=ex)
-        else:
-            holder.configure(text="(ejemplo de regla)", fg=MUTED,
-                             width=40, height=10)
-        holder.pack(pady=12)
-        for txt in ("Regla completamente visible", "Buena iluminación",
-                    "Enfoque nítido"):
-            row = tk.Frame(side, bg=CARD)
-            row.pack(anchor=tk.W, pady=2)
-            check_badge(row, color=GREEN).pack(side=tk.LEFT, padx=(0, 8))
-            tk.Label(row, text=txt, bg=CARD, fg=INK,
-                     font=(FONT, 10)).pack(side=tk.LEFT)
-        self._refresh_layout()
+            ex = self._example_image(300, 180)
+            holder = tk.Label(side, bg="#dfe3ea")
+            if ex is not None:
+                self._photo["example"] = ex
+                holder.configure(image=ex)
+            else:
+                holder.configure(text="(ejemplo de regla)", fg=MUTED,
+                                 width=40, height=10)
+            holder.pack(pady=12)
+            for txt in ("Regla completamente visible", "Buena iluminación",
+                        "Enfoque nítido"):
+                row = tk.Frame(side, bg=CARD)
+                row.pack(anchor=tk.W, pady=2)
+                check_badge(row, color=GREEN).pack(side=tk.LEFT, padx=(0, 8))
+                tk.Label(row, text=txt, bg=CARD, fg=INK,
+                         font=(FONT, 10)).pack(side=tk.LEFT)
+
+        self._switch_screen(build)
 
     def _example_image(self, w, h):
-        for name in ("test_ruler_real.jpg", "test_ruler.jpg"):
+        for name in (os.path.join("assets", "ruler_example.jpg"),
+                     "test_ruler_real.jpg", "test_ruler.jpg"):
             p = resource_path(name)
             if os.path.exists(p):
                 try:
@@ -824,7 +951,7 @@ class App(_Base):
                                    "Primero suba una foto de la regla.")
             return
         path = self.calib_path
-        self._run_async(lambda: detect_ruler_spacing(path),
+        self._run_async(lambda: _detect_ruler_spacing(path),
                         self._on_calibration_done, "Detectando regla…")
 
     def _on_calibration_done(self, ruler):
@@ -963,25 +1090,27 @@ class App(_Base):
 
     # ============================================================ PANTALLA 2
     def show_drops(self):
-        self._screen = "drops"
-        self._clear_cards()
-        card = self._new_card()
-        self._card_title(card, "Selecciona la imagen de gotas")
-        DropZone(card, self._on_drops_file, width=420).pack(
-            fill=tk.X, pady=(16, 10))
-        self.drops_chip = tk.Frame(card, bg=CARD)
-        self.drops_chip.pack(fill=tk.X)
-        note = ("Calibrado: tamaños en µm." if self.um_per_pixel
-                else "Sin calibración: tamaños en píxeles.")
-        tk.Label(card, text=note, bg=CARD, fg=MUTED,
-                 font=(FONT, 9)).pack(anchor=tk.W, pady=(10, 0))
-        btns = tk.Frame(card, bg=CARD)
-        btns.pack(fill=tk.X, pady=(22, 2))
-        RoundButton(btns, "Analizar", command=self._submit_drops,
-                    kind="primary").pack(side=tk.RIGHT)
-        RoundButton(btns, "Volver", command=self.show_calibration,
-                    kind="ghost").pack(side=tk.RIGHT, padx=10)
-        self._refresh_layout()
+        def build():
+            self._screen = "drops"
+            self._clear_cards()
+            card = self._new_card()
+            self._card_title(card, "Selecciona la imagen de gotas")
+            DropZone(card, self._on_drops_file, width=420).pack(
+                fill=tk.X, pady=(16, 10))
+            self.drops_chip = tk.Frame(card, bg=CARD)
+            self.drops_chip.pack(fill=tk.X)
+            note = ("Calibrado: tamaños en µm." if self.um_per_pixel
+                    else "Sin calibración: tamaños en píxeles.")
+            tk.Label(card, text=note, bg=CARD, fg=MUTED,
+                     font=(FONT, 9)).pack(anchor=tk.W, pady=(10, 0))
+            btns = tk.Frame(card, bg=CARD)
+            btns.pack(fill=tk.X, pady=(22, 2))
+            RoundButton(btns, "Analizar", command=self._submit_drops,
+                        kind="primary").pack(side=tk.RIGHT)
+            RoundButton(btns, "Volver", command=self.show_calibration,
+                        kind="ghost").pack(side=tk.RIGHT, padx=10)
+
+        self._switch_screen(build)
 
     def _on_drops_file(self, path):
         self.drops_path = path
@@ -1010,71 +1139,76 @@ class App(_Base):
 
     # ============================================================ PANTALLA 3
     def show_results(self):
-        self._screen = "results"
-        self._clear_cards()
-        card = self._new_card()
-        tk.Label(card, text=APP_TITLE.upper(), bg=CARD, fg=HEAD_BLUE,
-                 font=(FONT, 14, "bold")).pack(pady=(0, 16))
-        body = tk.Frame(card, bg=CARD)
-        body.pack(fill=tk.BOTH, expand=True)
+        def build():
+            self._screen = "results"
+            self._clear_cards()
+            card = self._new_card()
+            self.result_title = tk.Label(card, text=APP_TITLE.upper(), bg=CARD,
+                                         fg=HEAD_BLUE,
+                                         font=(FONT, 13, "bold"))
+            self.result_title.pack(pady=(0, 10))
+            body = tk.Frame(card, bg=CARD)
+            body.pack(fill=tk.BOTH, expand=True)
 
-        left = tk.Frame(body, bg=CARD)
-        left.pack(side=tk.LEFT, padx=(0, 24))
-        self.drops_canvas = tk.Canvas(left, width=540, height=420, bg="#000",
-                                      highlightthickness=0)
-        self.drops_canvas.pack()
-        self.drops_canvas.bind("<Configure>",
-                               lambda e: self._refresh_drops_image())
-        self.drops_canvas.bind("<MouseWheel>", self._on_zoom)
-        self.drops_canvas.bind("<Button-4>", self._on_zoom)
-        self.drops_canvas.bind("<Button-5>", self._on_zoom)
-        self.drops_canvas.bind("<ButtonPress-1>", self._on_pan_start)
-        self.drops_canvas.bind("<B1-Motion>", self._on_pan_move)
-        self.drops_canvas.bind("<Double-Button-1>",
-                               lambda e: self._reset_zoom())
+            left = tk.Frame(body, bg=CARD)
+            left.pack(side=tk.LEFT, padx=(0, 20))
+            self.drops_canvas = tk.Canvas(left, width=500, height=300,
+                                          bg="#000", highlightthickness=0)
+            self.drops_canvas.pack()
+            self.drops_canvas.bind("<Configure>",
+                                   lambda e: self._refresh_drops_image())
+            self.drops_canvas.bind("<MouseWheel>", self._on_zoom)
+            self.drops_canvas.bind("<Button-4>", self._on_zoom)
+            self.drops_canvas.bind("<Button-5>", self._on_zoom)
+            self.drops_canvas.bind("<ButtonPress-1>", self._on_pan_start)
+            self.drops_canvas.bind("<B1-Motion>", self._on_pan_move)
+            self.drops_canvas.bind("<Double-Button-1>",
+                                   lambda e: self._reset_zoom())
 
-        # Barra de zoom visible (como en la versión anterior)
-        zoombar = tk.Frame(left, bg=CARD)
-        zoombar.pack(fill=tk.X, pady=(10, 0))
-        RoundButton(zoombar, "−", command=lambda: self._zoom_by(1 / 1.25),
-                    kind="light").pack(side=tk.LEFT)
-        RoundButton(zoombar, "+", command=lambda: self._zoom_by(1.25),
-                    kind="light").pack(side=tk.LEFT, padx=6)
-        RoundButton(zoombar, "Ajustar", command=self._reset_zoom,
-                    kind="light").pack(side=tk.LEFT)
-        self.zoom_lbl = tk.Label(zoombar, text="100%", bg=CARD, fg=MUTED,
-                                 font=(FONT, 9, "bold"), width=6)
-        self.zoom_lbl.pack(side=tk.LEFT, padx=8)
-        tk.Label(left, text="Rueda: zoom · Arrastrar: mover · "
-                 "Doble clic: ajustar", bg=CARD, fg=MUTED,
-                 font=(FONT, 8)).pack(anchor=tk.W, pady=(4, 0))
+            # Barra de zoom visible (como en la versión anterior)
+            zoombar = tk.Frame(left, bg=CARD)
+            zoombar.pack(fill=tk.X, pady=(6, 0))
+            RoundButton(zoombar, "−", command=lambda: self._zoom_by(1 / 1.25),
+                        kind="light").pack(side=tk.LEFT)
+            RoundButton(zoombar, "+", command=lambda: self._zoom_by(1.25),
+                        kind="light").pack(side=tk.LEFT, padx=6)
+            RoundButton(zoombar, "Ajustar", command=self._reset_zoom,
+                        kind="light").pack(side=tk.LEFT)
+            self.zoom_lbl = tk.Label(zoombar, text="100%", bg=CARD, fg=MUTED,
+                                     font=(FONT, 9, "bold"), width=6)
+            self.zoom_lbl.pack(side=tk.LEFT, padx=8)
+            self.result_help_lbl = tk.Label(
+                left,
+                text="Rueda: zoom · Arrastrar: mover · Doble clic: ajustar",
+                bg=CARD, fg=MUTED, font=(FONT, 8))
+            self.result_help_lbl.pack(anchor=tk.W, pady=(4, 0))
 
-        self._slider(left, "OSCURIDAD", self.darkness_var)
-        self._slider(left, "ENFOQUE", self.focus_var)
-        self._update_zoom_label()
+            self._slider(left, "OSCURIDAD", self.darkness_var)
+            self._slider(left, "ENFOQUE", self.focus_var)
+            self._update_zoom_label()
 
-        right = tk.Frame(body, bg=CARD)
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.fig = Figure(figsize=(5.0, 3.8), dpi=100)
-        self.fig.patch.set_facecolor(CARD)
-        self.ax = self.fig.add_subplot(111)
-        self.chart_canvas = FigureCanvasTkAgg(self.fig, master=right)
-        # Botón abajo a la derecha y estadísticas justo encima; el histograma
-        # ocupa todo el espacio restante de la columna.
-        RoundButton(right, "Cargar nuevo archivo", command=self.show_drops,
-                    kind="primary").pack(side=tk.BOTTOM, anchor=tk.E,
-                                         pady=(12, 0))
-        self.stats_box = tk.Frame(right, bg=CARD)
-        self.stats_box.pack(side=tk.BOTTOM, anchor=tk.W, pady=(14, 8))
-        self.chart_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH,
-                                               expand=True)
+            right = tk.Frame(body, bg=CARD)
+            right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            Figure, FigureCanvasTkAgg = _matplotlib_tk()
+            self.fig = Figure(figsize=(4.2, 2.4), dpi=100)
+            self.fig.patch.set_facecolor(CARD)
+            self.ax = self.fig.add_subplot(111)
+            self.chart_canvas = FigureCanvasTkAgg(self.fig, master=right)
+            self.chart_widget = self.chart_canvas.get_tk_widget()
+            RoundButton(right, "Cargar nuevo archivo", command=self.show_drops,
+                        kind="primary").pack(side=tk.BOTTOM, anchor=tk.E,
+                                             pady=(8, 0))
+            self.stats_box = tk.Frame(right, bg=CARD)
+            self.stats_box.pack(side=tk.BOTTOM, anchor=tk.W, pady=(8, 4))
+            self.chart_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        self._render_results()
-        self._refresh_layout()
+            self._render_results()
+
+        self._switch_screen(build)
 
     def _slider(self, parent, label, var):
         wrap = tk.Frame(parent, bg=CARD)
-        wrap.pack(fill=tk.X, pady=(12, 0))
+        wrap.pack(fill=tk.X, pady=(8, 0))
         tk.Label(wrap, text=label, bg=CARD, fg=MUTED,
                  font=(FONT, 8, "bold")).pack(anchor=tk.W)
         Slider(wrap, var, on_release=self._on_slider_release,
@@ -1101,8 +1235,8 @@ class App(_Base):
         darkness = self.darkness_var.get()
         focus = self.focus_var.get()
         upp = self.um_per_pixel
-        return lambda: analyze_image(path, darkness_pct=darkness,
-                                     focus_pct=focus, um_per_pixel=upp)
+        return lambda: _analyze_image(path, darkness_pct=darkness,
+                                      focus_pct=focus, um_per_pixel=upp)
 
     # ----------------------------------------------------- pantalla de carga
     def _run_async(self, work, on_done, text="Procesando…"):
@@ -1123,11 +1257,14 @@ class App(_Base):
             if not box.get("done"):
                 self.after(50, poll)
                 return
-            self._hide_loading()
             if "error" in box:
+                self._hide_loading()
                 messagebox.showerror("Error", str(box["error"]))
                 return
-            on_done(box["value"])
+            try:
+                on_done(box["value"])
+            finally:
+                self._hide_loading()
 
         threading.Thread(target=worker, daemon=True).start()
         self.after(50, poll)
@@ -1188,17 +1325,21 @@ class App(_Base):
             w.destroy()
         res = self.result
         unit = res["unit"]
+        compact = getattr(self, "_compact_results", False)
+        font_size = 9 if compact else 11
+        badge_size = 16 if compact else 20
+        row_pady = 1 if compact else 3
         rows = [("Gotas reconocidas: ", f"{res['count']}"),
                 ("Tamaño promedio: ", f"{res['mean_width']:.0f} {unit}"),
                 ("Desviación estándar: ", f"{res['std_width']:.0f} {unit}")]
         for prefix, value in rows:
             row = tk.Frame(self.stats_box, bg=CARD)
-            row.pack(anchor=tk.W, pady=3)
-            check_badge(row).pack(side=tk.LEFT, padx=(0, 8))
+            row.pack(anchor=tk.W, pady=row_pady)
+            check_badge(row, d=badge_size).pack(side=tk.LEFT, padx=(0, 8))
             tk.Label(row, text=prefix, bg=CARD, fg=INK,
-                     font=(FONT, 11)).pack(side=tk.LEFT)
+                     font=(FONT, font_size)).pack(side=tk.LEFT)
             tk.Label(row, text=value, bg=CARD, fg=INK,
-                     font=(FONT, 11, "bold")).pack(side=tk.LEFT)
+                     font=(FONT, font_size, "bold")).pack(side=tk.LEFT)
 
     def _refresh_chart(self):
         self.ax.clear()
