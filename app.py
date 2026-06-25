@@ -53,6 +53,9 @@ HEADER_H = 150
 RADIUS = 26
 CARD_PAD = 28
 CARD_GAP = 26
+# Tiempo mínimo (ms) que la pantalla de carga permanece visible una vez que
+# aparece, para que no "parpadee" cuando el cálculo termina muy rápido.
+LOADING_MIN_MS = 700
 FILETYPES = [("Imágenes", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"),
              ("Todos los archivos", "*.*")]
 
@@ -584,6 +587,9 @@ class App(_Base):
         self.um_per_pixel = None
         self.ruler = None
         self.result = None
+        self.calib_example_holder = None   # Label de la imagen de ejemplo
+        self._calib_example_h = 0          # alto actual de esa imagen (auto-fit)
+        self._calib_example_pil = None     # fuente PIL cacheada
         self._photo = {}
         self._cards = []
         self._bg_size = (0, 0)
@@ -602,6 +608,7 @@ class App(_Base):
 
         self._card_cache = {}
         self._loading = None
+        self._job_seq = 0          # id del análisis en curso (evita carreras)
         self._switching = False
         self._screen = "calibration"
         self._compact_results = False
@@ -623,22 +630,36 @@ class App(_Base):
 
     # --------------------------------------------------------- fondo / layout
     def _set_initial_geometry(self):
-        """Ajusta la ventana al monitor para evitar que parta cortada."""
+        """Ajusta la ventana al monitor para evitar que parta cortada.
+
+        Nunca excede el espacio disponible: en pantallas pequeñas (o con
+        escalado DPI) la ventana se reduce al monitor en vez de salirse por
+        el borde derecho/inferior. El contenido se auto-ajusta aparte."""
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        w = max(980, min(1300, sw - 80))
-        h = max(620, min(860, sh - 90))
+        avail_w, avail_h = sw - 16, sh - 80   # deja sitio a bordes/barra tareas
+        # Tamaño preferido, pero acotado SIEMPRE a lo que cabe en el monitor.
+        w = min(max(760, min(1300, avail_w)), avail_w)
+        h = min(max(560, min(860, avail_h)), avail_h)
         x = max((sw - w) // 2, 0)
         y = max((sh - h) // 2, 0)
         self.geometry(f"{w}x{h}+{x}+{y}")
-        self.minsize(min(980, max(sw - 80, 760)),
-                     min(620, max(sh - 120, 520)))
+        # El mínimo tampoco puede ser mayor que la ventana que cabe.
+        self.minsize(min(760, w), min(520, h))
 
-    def _relayout(self, event=None):
+    def _relayout(self, event=None, force=False):
         if getattr(self, "_switching", False):
             return
         W, H = self.winfo_width(), self.winfo_height()
         if W <= 1 or H <= 1:
             return
+        # Anti-tormenta: si la ventana NO cambió de tamaño (mismo W/H, pantalla
+        # y nº de tarjetas), no rehacer el layout ni repintar el fondo. Esto
+        # evita el bucle de <Configure> al refrescar resultados (que hacía
+        # parpadear el degradado azul al mover los sliders).
+        key = (W, H, self._screen, len(self._cards))
+        if not force and key == getattr(self, "_layout_key", None):
+            return
+        self._layout_key = key
         self._resize_result_widgets(W, H)
         self._draw_header(W)
         if not self._cards:
@@ -648,6 +669,12 @@ class App(_Base):
         self.bg.update_idletasks()
         sizes = [(c["frame"].winfo_reqwidth(), c["frame"].winfo_reqheight())
                  for c in self._cards]
+        # Auto-ajuste: encoge la imagen de ejemplo si la pantalla es baja, y
+        # re-mide para que el layout use el tamaño ya corregido.
+        if self._autofit_calibration(sizes, H):
+            self.bg.update_idletasks()
+            sizes = [(c["frame"].winfo_reqwidth(), c["frame"].winfo_reqheight())
+                     for c in self._cards]
         widths = [w + 2 * CARD_PAD for (w, h) in sizes]
         total = sum(widths) + CARD_GAP * (len(self._cards) - 1)
         stack = len(self._cards) > 1 and total > W - 40
@@ -752,12 +779,19 @@ class App(_Base):
         if hasattr(self, "fig"):
             fig_w = max(3.2, min(4.8, (W - canvas_w - 220) / 105))
             fig_h = max(2.1, min(3.35, canvas_h / 105))
-            self.fig.set_size_inches(fig_w, fig_h, forward=True)
-            if hasattr(self, "chart_widget"):
-                self.chart_widget.configure(width=int(fig_w * 100),
-                                            height=int(fig_h * 100))
-            if self.result and hasattr(self, "chart_canvas"):
-                self._refresh_chart()
+            # Solo reconfigurar si el tamaño realmente cambió. Si no, redimensionar
+            # la figura (forward=True) reemitiría un <Configure> que vuelve a
+            # llamar a _relayout -> bucle de repintado (degradado azul parpadea).
+            prev = getattr(self, "_fig_size", None)
+            if prev is None or abs(prev[0] - fig_w) > 0.02 \
+                    or abs(prev[1] - fig_h) > 0.02:
+                self._fig_size = (fig_w, fig_h)
+                self.fig.set_size_inches(fig_w, fig_h, forward=True)
+                if hasattr(self, "chart_widget"):
+                    self.chart_widget.configure(width=int(fig_w * 100),
+                                                height=int(fig_h * 100))
+                if self.result and hasattr(self, "chart_canvas"):
+                    self._refresh_chart()
 
     def _set_window_icon(self):
         """Ícono de la ventana/barra de tareas con el logo de CCTVal."""
@@ -827,7 +861,7 @@ class App(_Base):
 
     def _refresh_layout(self):
         self.update_idletasks()
-        self._relayout()
+        self._relayout(force=True)
 
     def _switch_screen(self, build):
         """Construye una pantalla fuera de vista y la muestra ya estabilizada."""
@@ -840,7 +874,7 @@ class App(_Base):
         finally:
             self.bg.pack(fill=tk.BOTH, expand=True)
             self._switching = False
-        self._relayout()
+        self._relayout(force=True)
         self.update_idletasks()
 
     def _card_title(self, parent, subtitle):
@@ -899,15 +933,13 @@ class App(_Base):
             tk.Label(head, text="Ejemplo de imagen correcta", bg=CARD,
                      fg=HEAD_BLUE, font=(FONT, 10, "bold")).pack(side=tk.LEFT)
 
-            ex = self._example_image(300, 180)
             holder = tk.Label(side, bg="#dfe3ea")
-            if ex is not None:
-                self._photo["example"] = ex
-                holder.configure(image=ex)
-            else:
+            self.calib_example_holder = holder
+            self._calib_example_h = 0
+            holder.pack(pady=12)
+            if not self._set_calib_example(180):
                 holder.configure(text="(ejemplo de regla)", fg=MUTED,
                                  width=40, height=10)
-            holder.pack(pady=12)
             for txt in ("Regla completamente visible", "Buena iluminación",
                         "Enfoque nítido"):
                 row = tk.Frame(side, bg=CARD)
@@ -918,17 +950,56 @@ class App(_Base):
 
         self._switch_screen(build)
 
+    def _example_pil(self):
+        """Fuente PIL de la imagen de ejemplo (cacheada). False si no hay."""
+        if self._calib_example_pil is None:
+            self._calib_example_pil = False
+            for name in (os.path.join("assets", "ruler_example.jpg"),
+                         "test_ruler_real.jpg", "test_ruler.jpg"):
+                p = resource_path(name)
+                if os.path.exists(p):
+                    try:
+                        self._calib_example_pil = \
+                            Image.open(p).convert("RGB")
+                        break
+                    except Exception:
+                        pass
+        return self._calib_example_pil
+
     def _example_image(self, w, h):
-        for name in (os.path.join("assets", "ruler_example.jpg"),
-                     "test_ruler_real.jpg", "test_ruler.jpg"):
-            p = resource_path(name)
-            if os.path.exists(p):
-                try:
-                    return ImageTk.PhotoImage(
-                        _fit(Image.open(p).convert("RGB"), w, h))
-                except Exception:
-                    pass
-        return None
+        src = self._example_pil()
+        if not src:
+            return None
+        return ImageTk.PhotoImage(_fit(src, w, h))
+
+    def _set_calib_example(self, target_h):
+        """Reescala la imagen de ejemplo a `target_h` px de alto y la coloca."""
+        holder = self.calib_example_holder
+        if holder is None or not holder.winfo_exists():
+            return False
+        src = self._example_pil()
+        if not src:
+            return False
+        ex = ImageTk.PhotoImage(_fit(src, 300, target_h))
+        self._photo["example"] = ex
+        holder.configure(image=ex)
+        self._calib_example_h = ex.height()
+        return True
+
+    def _autofit_calibration(self, sizes, H):
+        """Encoge la imagen de ejemplo lo justo para que la tarjeta de
+        calibración quepa sin scroll en pantallas bajas (y la restaura al
+        agrandar). Devuelve True si cambió algo (para re-medir el layout)."""
+        if self._screen != "calibration" or self._calib_example_h <= 0:
+            return False
+        side_h = max(h for (w, h) in sizes)        # tarjeta más alta (ejemplo)
+        non_image = side_h - self._calib_example_h  # todo menos la imagen
+        # Tope de alto del frame para que NO active scroll (ver _relayout).
+        max_frame = H - HEADER_H - 40 - 2 * CARD_PAD
+        target = int(max(80, min(180, max_frame - non_image)))
+        if abs(target - self._calib_example_h) <= 2:
+            return False
+        return self._set_calib_example(target)
 
     def _on_calib_file(self, path):
         self.calib_path = path
@@ -1195,9 +1266,12 @@ class App(_Base):
             self.ax = self.fig.add_subplot(111)
             self.chart_canvas = FigureCanvasTkAgg(self.fig, master=right)
             self.chart_widget = self.chart_canvas.get_tk_widget()
-            RoundButton(right, "Cargar nuevo archivo", command=self.show_drops,
-                        kind="primary").pack(side=tk.BOTTOM, anchor=tk.E,
-                                             pady=(8, 0))
+            btnrow = tk.Frame(right, bg=CARD)
+            btnrow.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
+            RoundButton(btnrow, "Cargar nuevo archivo", command=self.show_drops,
+                        kind="primary").pack(side=tk.RIGHT)
+            RoundButton(btnrow, "Exportar Excel", command=self._export_excel,
+                        kind="ghost").pack(side=tk.RIGHT, padx=(0, 10))
             self.stats_box = tk.Frame(right, bg=CARD)
             self.stats_box.pack(side=tk.BOTTOM, anchor=tk.W, pady=(8, 4))
             self.chart_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -1217,8 +1291,11 @@ class App(_Base):
     def _on_slider_release(self):
         if not self.drops_path:
             return
+        # delay=0: la pantalla de carga aparece de inmediato y permanece el
+        # tiempo mínimo (LOADING_MIN_MS), estable. Ya no parpadea porque se
+        # eliminó la tormenta de re-layout (ver _relayout / _resize_result_widgets).
         self._run_async(self._analysis_work(), self._on_slider_analyzed,
-                        "Recalculando…")
+                        "Recalculando…", delay=0)
 
     def _on_slider_analyzed(self, res):
         if not res.get("ok"):
@@ -1239,12 +1316,37 @@ class App(_Base):
                                       focus_pct=focus, um_per_pixel=upp)
 
     # ----------------------------------------------------- pantalla de carga
-    def _run_async(self, work, on_done, text="Procesando…"):
+    def _run_async(self, work, on_done, text="Procesando…", delay=180):
         """Ejecuta work() en un hilo mostrando la pantalla de carga animada.
         El hilo solo escribe en `box`; el hilo principal hace polling (Tk no es
-        seguro entre hilos) y al terminar llama on_done(resultado)."""
-        self._show_loading(text)
+        seguro entre hilos) y al terminar llama on_done(resultado).
+
+        Cada llamada recibe un `job_id`. Si se dispara otro análisis antes de
+        que este termine (p. ej. moviendo los sliders rápido), este queda
+        obsoleto: su poll se detiene y su resultado se descarta, de modo que
+        nunca se aplica un resultado viejo encima de uno más nuevo ni se oculta
+        la pantalla de carga del trabajo vigente.
+
+        La pantalla de carga solo aparece si el trabajo tarda más de `delay`
+        ms: así un recálculo rápido (mover un slider) no provoca el parpadeo
+        del overlay sobre toda la app, pero una operación lenta (detección de
+        regla en una foto grande) sí muestra feedback. Con `delay=None` el
+        overlay NO se muestra nunca (actualización en el sitio, sin tinte)."""
+        self._job_seq += 1
+        job_id = self._job_seq
         box = {}
+
+        def maybe_show():
+            if job_id == self._job_seq and not box.get("done"):
+                self._show_loading(text)
+
+        if delay is None:
+            show_job = None
+        elif delay > 0:
+            show_job = self.after(delay, maybe_show)
+        else:
+            show_job = None
+            self._show_loading(text)
 
         def worker():
             try:
@@ -1254,9 +1356,17 @@ class App(_Base):
             box["done"] = True
 
         def poll():
+            # Un análisis más reciente tomó el control: descartar este.
+            if job_id != self._job_seq:
+                return
             if not box.get("done"):
                 self.after(50, poll)
                 return
+            if show_job is not None:
+                try:
+                    self.after_cancel(show_job)
+                except Exception:
+                    pass
             if "error" in box:
                 self._hide_loading()
                 messagebox.showerror("Error", str(box["error"]))
@@ -1283,8 +1393,19 @@ class App(_Base):
         cv.create_text(W / 2, H / 2 + 82, text=text, fill="white",
                        font=(FONT, 12), tags="ldtext")
         self._loading = {"cv": cv, "angle": 0, "cx": W / 2,
-                         "cy": H / 2 + 24, "text": text, "job": None}
+                         "cy": H / 2 + 24, "text": text, "job": None,
+                         "locked": True, "hide_pending": False}
+        # Bloquea el ocultado hasta cumplir el tiempo mínimo en pantalla.
+        self.after(LOADING_MIN_MS, self._unlock_loading)
         self._spin()
+
+    def _unlock_loading(self):
+        ld = self._loading
+        if not ld:
+            return
+        ld["locked"] = False
+        if ld.get("hide_pending"):
+            self._hide_loading()
 
     def _spin(self):
         ld = self._loading
@@ -1304,6 +1425,10 @@ class App(_Base):
     def _hide_loading(self):
         ld = self._loading
         if not ld:
+            return
+        # Aún no cumple el tiempo mínimo en pantalla: aplazar el ocultado.
+        if ld.get("locked"):
+            ld["hide_pending"] = True
             return
         if ld.get("job"):
             try:
@@ -1329,6 +1454,38 @@ class App(_Base):
         font_size = 9 if compact else 11
         badge_size = 16 if compact else 20
         row_pady = 1 if compact else 3
+        meta_size = 8 if compact else 9
+
+        # Metadatos del análisis: archivo de origen y escala de calibración
+        # usada (en la misma paleta CCTVal que el resto de la tarjeta).
+        def _meta_row(prefix, value):
+            meta = tk.Frame(self.stats_box, bg=CARD)
+            meta.pack(anchor=tk.W, pady=(0, row_pady))
+            doc_icon(meta).pack(side=tk.LEFT, padx=(0, 8))
+            tk.Label(meta, text=prefix, bg=CARD, fg=MUTED,
+                     font=(FONT, meta_size)).pack(side=tk.LEFT)
+            tk.Label(meta, text=value, bg=CARD, fg=INK,
+                     font=(FONT, meta_size, "bold")).pack(side=tk.LEFT)
+
+        if self.drops_path:
+            _meta_row("Archivo de gotas: ",
+                      os.path.basename(self.drops_path))
+        if self.calib_path:
+            _meta_row("Imagen de referencia: ",
+                      os.path.basename(self.calib_path))
+
+        scale_row = tk.Frame(self.stats_box, bg=CARD)
+        scale_row.pack(anchor=tk.W, pady=(0, row_pady))
+        gear_icon(scale_row, d=20).pack(side=tk.LEFT, padx=(0, 8))
+        if self.um_per_pixel:
+            scale_text = f"{self.um_per_pixel:.3f} µm/píxel"
+        else:
+            scale_text = "Sin calibración (píxeles)"
+        tk.Label(scale_row, text="Escala: ", bg=CARD, fg=MUTED,
+                 font=(FONT, meta_size)).pack(side=tk.LEFT)
+        tk.Label(scale_row, text=scale_text, bg=CARD, fg=ACCENT,
+                 font=(FONT, meta_size, "bold")).pack(side=tk.LEFT)
+
         rows = [("Gotas reconocidas: ", f"{res['count']}"),
                 ("Tamaño promedio: ", f"{res['mean_width']:.0f} {unit}"),
                 ("Desviación estándar: ", f"{res['std_width']:.0f} {unit}")]
@@ -1340,6 +1497,120 @@ class App(_Base):
                      font=(FONT, font_size)).pack(side=tk.LEFT)
             tk.Label(row, text=value, bg=CARD, fg=INK,
                      font=(FONT, font_size, "bold")).pack(side=tk.LEFT)
+
+    # ------------------------------------------------------- exportar a Excel
+    def _export_excel(self):
+        """Guarda el resumen y la tabla por gota en un .xlsx elegido por el
+        usuario (resumen + una fila por gota detectada)."""
+        if not self.result:
+            return
+        default = "datos_gotas.xlsx"
+        if self.drops_path:
+            base = os.path.splitext(os.path.basename(self.drops_path))[0]
+            default = f"{base}_gotas.xlsx"
+        path = filedialog.asksaveasfilename(
+            title="Guardar datos en Excel", defaultextension=".xlsx",
+            initialfile=default,
+            filetypes=[("Libro de Excel", "*.xlsx"),
+                       ("Todos los archivos", "*.*")])
+        if not path:
+            return
+        try:
+            self._write_excel(path, self.result)
+        except ImportError:
+            messagebox.showerror(
+                "Exportar",
+                "Falta la librería 'openpyxl' para generar el Excel.\n"
+                "Instálela con:  pip install openpyxl")
+            return
+        except Exception as exc:                       # noqa: BLE001
+            messagebox.showerror("Exportar",
+                                 f"No se pudo guardar el archivo:\n{exc}")
+            return
+        messagebox.showinfo("Exportar", f"Datos guardados en:\n{path}")
+
+    def _write_excel(self, path, res):
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+
+        unit = res["unit"]
+        upp = self.um_per_pixel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Gotas"
+
+        head_fill = PatternFill("solid", fgColor="2E31C6")   # índigo CCTVal
+        head_font = Font(bold=True, color="FFFFFF")
+        bold = Font(bold=True)
+
+        ws["A1"] = APP_TITLE
+        ws["A1"].font = Font(bold=True, size=14, color="2E31C6")
+
+        summary = [
+            ("Archivo de gotas",
+             os.path.basename(self.drops_path) if self.drops_path else "—"),
+            ("Imagen de referencia",
+             os.path.basename(self.calib_path) if self.calib_path else "—"),
+            ("Escala", f"{upp:.4f} µm/píxel" if upp
+             else "Sin calibración (píxeles)"),
+            ("Unidad de medida", unit),
+            ("Gotas reconocidas", res["count"]),
+            (f"Tamaño promedio ({unit})", round(res["mean_width"], 2)),
+            (f"Desviación estándar ({unit})", round(res["std_width"], 2)),
+        ]
+        r = 3
+        for key, value in summary:
+            ws.cell(row=r, column=1, value=key).font = bold
+            ws.cell(row=r, column=2, value=value)
+            r += 1
+
+        r += 1
+        headers = ["#", f"Ancho ({unit})", "Ancho (px)", "Alto (px)",
+                   "Área (px²)"]
+        for col, text in enumerate(headers, start=1):
+            cell = ws.cell(row=r, column=col, value=text)
+            cell.fill = head_fill
+            cell.font = head_font
+            cell.alignment = Alignment(horizontal="center")
+        header_row = r
+        r += 1
+        for i, c in enumerate(res.get("circles", []), start=1):
+            wpx = c["max_width"]
+            ws.cell(row=r, column=1, value=i)
+            ws.cell(row=r, column=2,
+                    value=round(wpx * upp, 2) if upp else wpx)
+            ws.cell(row=r, column=3, value=wpx)
+            ws.cell(row=r, column=4, value=c["max_height"])
+            ws.cell(row=r, column=5, value=c["pixel_count"])
+            r += 1
+
+        for col, width in enumerate((6, 16, 12, 12, 14), start=1):
+            ws.column_dimensions[get_column_letter(col)].width = width
+        ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
+
+        # Segunda hoja: distribución de frecuencias (mismos 30 bins que el
+        # histograma de la pantalla de resultados).
+        fs = wb.create_sheet("Frecuencia")
+        f_headers = [f"Ancho desde ({unit})", f"Ancho hasta ({unit})",
+                     "Frecuencia"]
+        for col, text in enumerate(f_headers, start=1):
+            cell = fs.cell(row=1, column=col, value=text)
+            cell.fill = head_fill
+            cell.font = head_font
+            cell.alignment = Alignment(horizontal="center")
+        widths_data = res.get("widths", [])
+        if widths_data:
+            counts, edges = np.histogram(widths_data, bins=30)
+            for i, n in enumerate(counts):
+                fs.cell(row=i + 2, column=1, value=round(float(edges[i]), 2))
+                fs.cell(row=i + 2, column=2, value=round(float(edges[i + 1]), 2))
+                fs.cell(row=i + 2, column=3, value=int(n))
+        for col, width in enumerate((18, 18, 12), start=1):
+            fs.column_dimensions[get_column_letter(col)].width = width
+        fs.freeze_panes = fs.cell(row=2, column=1)
+
+        wb.save(path)
 
     def _refresh_chart(self):
         self.ax.clear()
@@ -1358,9 +1629,19 @@ class App(_Base):
             s.set_color(BORDER)
         self.ax.grid(axis="y", color="#eef0f4", linewidth=1)
         self.ax.set_axisbelow(True)
+        # Frecuencia = conteo: eje Y solo con enteros.
+        from matplotlib.ticker import MaxNLocator
+        self.ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         if widths:
-            self.ax.hist(widths, bins=30, color=PRIMARY, edgecolor="white",
-                         linewidth=0.5)
+            # Nº de bins adaptativo: con pocas gotas, muchos bins quedan
+            # vacíos y dejan huecos; se acota entre 8 y 30 según el conteo.
+            bins = int(max(8, min(30, np.sqrt(len(widths)) * 2)))
+            # Borde índigo más oscuro: marca el contorno de cada barra para
+            # distinguirlas, pero al no ser blanco siguen viéndose pegadas.
+            self.ax.hist(widths, bins=bins, color=PRIMARY,
+                         edgecolor=PRIMARY_ACTIVE, linewidth=0.8)
+            # Barras pegadas: sin margen lateral, que ocupen todo el ancho.
+            self.ax.margins(x=0)
         else:
             self.ax.text(0.5, 0.5, "Sin gotas detectadas", ha="center",
                          va="center", transform=self.ax.transAxes, color="#999")

@@ -120,20 +120,21 @@ regla.
 
 #### Detección automática de la separación de las marcas
 
-Función: `detect_ruler_spacing(image_path, max_dim=900)`.
+Función: `detect_ruler_spacing(image_path, max_dim=1400)`.
 
-1. **Reducción de tamaño**: lado mayor llevado a `max_dim = 900 px`, factor
+1. **Reducción de tamaño**: lado mayor llevado a `max_dim = 1400 px`, factor
    `f = max_dim / max(alto, ancho)`. Al final la separación se reescala
    dividiendo por `f`.
-2. **Realce de contraste (CLAHE)**: `clipLimit=2.0`, `tileGridSize=(8,8)`.
+2. **Realce de contraste (CLAHE)**: `clipLimit=3.0`, `tileGridSize=(8,8)`.
    Resalta marcas tenues.
 3. **Búsqueda del ángulo de inclinación (shear)**: se prueban cizallamientos
-   `sh` de **-0.16 a 0.16** (≈ ±9°) en pasos de 0.02:
+   `sh` de **-0.6 a 0.6** (≈ ±31°) en pasos de 0.04:
    - Marcas horizontales (regla vertical): `y' = sh·x + y`.
    - Marcas verticales (regla horizontal): `x' = x + sh·y`.
    El ángulo correcto alinea las marcas y maximiza la periodicidad.
 4. **Análisis por bandas**: bandas perpendiculares a las marcas
-   (`band_w = perp/6`, paso `band_w/2`), cada una promediada a un perfil 1D.
+   (`band_w = max(30, perp/20)`, paso `band_w/2`), cada una promediada a un
+   perfil 1D.
 5. **Periodicidad por autocorrelación** (`_analyze_band`):
    - Se quita la tendencia de iluminación: `detr = perfil − suavizado`.
    - `energy = desviación estándar del perfil` (contraste de la banda).
@@ -142,7 +143,7 @@ Función: `detect_ruler_spacing(image_path, max_dim=900)`.
    - `score = confianza × energy` → prioriza bandas periódicas **y** con
      contraste (la regla), descartando zonas lisas o en blanco.
 6. **Refinamiento fino del ángulo**: alrededor del mejor `sh` se prueba un rango
-   más fino (paso 0.005 ≈ 0.3°) sobre la banda elegida.
+   más fino (±0.04 en pasos de 0.008) sobre la banda elegida.
 7. **Separación y confianza finales** (`_refine_ticks`):
    - `spacing` = **mediana** de las separaciones consecutivas entre marcas
      (más robusta que el periodo entero de la autocorrelación).
