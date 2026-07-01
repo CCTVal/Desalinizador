@@ -4,22 +4,24 @@
 #include <SPI.h>
 // include Playing With Fusion MAX31865 library
 #include <PwFusion_MAX31865.h> 
+#include "I2CScanner.h"
 
 // CS pin used for the connection with the sensor
 // other connections are controlled by the SPI library)
 const int CS_PIN = 9;
-
+I2CScanner scanner;
 // Create instance of MAX31865 class
 MAX31865 rtd0;
 
 void PrintRTDStatus(uint8_t status);
+  
 void setup() {
   Serial.begin(9600);
   Serial.println(F("Boot"));
 
   // setup for the the SPI library:
   SPI.begin();
-  
+
   // initalize the chip select pin
   pinMode(CS_PIN, OUTPUT);
 
@@ -29,9 +31,13 @@ void setup() {
   rtd0.setHighFaultTemperature(70); // Set the high fault threshold to 70 degrees C
 
   Serial.println(F("MAX31865 Configured"));
-  
   // give the sensor time to set up
   delay(100);
+  
+  // Init i2c scanner
+  scanner.Init();
+
+
 }
 
 
@@ -39,21 +45,20 @@ void loop()
 {
   // Get the latest temperature and status values from the MAX31865
   rtd0.sample();
-  
   // Print the current values to the serial port
+  /*
   Serial.print(rtd0.getResistance());
   Serial.print(F(" Ohms,   "));
-
   Serial.print(rtd0.getTemperature());
   Serial.print(F(" C,   "));
-
   // Print the Status bitmask
   PrintRTDStatus(rtd0.getStatus());
-
-  // 500ms delay... can be much faster
-  delay(500);    
+  // can be faster
+  delay(100);
+  */
+  scanner.Scan();
+  delay(5000);
 }
-
 
 void PrintRTDStatus(uint8_t status)
 {
@@ -64,8 +69,7 @@ void PrintRTDStatus(uint8_t status)
   }
   else 
   {
-    // status is a bitmask, so multiple faults may be active at the same time
-
+    // status is a bitmask, so multiple faults may be active at the same time    
     // The RTD temperature is above the threshold set by setHighFaultTemperature()
     if (status & RTD_FAULT_TEMP_HIGH)
     {
