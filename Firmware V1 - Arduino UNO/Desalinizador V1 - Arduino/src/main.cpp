@@ -7,7 +7,7 @@
 #include "I2CScanner.h"
 
 // CS pin used for the connection with the sensor
-// other connections are controlled by the SPI library)
+// other connections are controlled by the SPI library
 const int CS_PIN = 9;
 I2CScanner scanner;
 // Create instance of MAX31865 class
@@ -19,15 +19,15 @@ void setup() {
   Serial.begin(9600);
   Serial.println(F("Boot"));
 
-  // setup for the the SPI library:
+  // setup for the the SPI library for max31865
   SPI.begin();
 
-  // initalize the chip select pin
+  // initalize the chip select pin for max31865
   pinMode(CS_PIN, OUTPUT);
 
-  // configure rtd sensor
+  // configure pt100 sensor
   rtd0.begin(CS_PIN, RTD_4_WIRE, RTD_TYPE_PT100);
-  rtd0.setLowFaultTemperature(30);  // Set the low fault threshold to 30 degrees C
+  rtd0.setLowFaultTemperature(10);  // Set the low fault threshold to 30 degrees C
   rtd0.setHighFaultTemperature(70); // Set the high fault threshold to 70 degrees C
 
   Serial.println(F("MAX31865 Configured"));
@@ -36,8 +36,6 @@ void setup() {
   
   // Init i2c scanner
   scanner.Init();
-
-
 }
 
 
@@ -46,18 +44,11 @@ void loop()
   // Get the latest temperature and status values from the MAX31865
   rtd0.sample();
   // Print the current values to the serial port
-  /*
-  Serial.print(rtd0.getResistance());
-  Serial.print(F(" Ohms,   "));
   Serial.print(rtd0.getTemperature());
   Serial.print(F(" C,   "));
-  // Print the Status bitmask
-  PrintRTDStatus(rtd0.getStatus());
-  // can be faster
+
+  // can be faster?
   delay(100);
-  */
-  scanner.Scan();
-  delay(5000);
 }
 
 void PrintRTDStatus(uint8_t status)
