@@ -10,6 +10,8 @@
 // other connections are controlled by the SPI library
 const int CS_PIN = 9;
 const int interruptPin_pulsecounter = 2;
+const int analogPin_presure1 = A0;
+const int analogPin_presure2 = A1;
 
 I2CScanner scanner; // not useful for now
 // Create instance of MAX31865 class
@@ -20,6 +22,8 @@ unsigned long actual_millis = 0;
 volatile unsigned long int pulse_counter = 0;
 unsigned long int last_pulses = 0;
 unsigned long int diff_pulses = 0;
+int presure1 = 0;
+int presure2 = 0;
 
 void PrintRTDStatus(uint8_t status);
 void IR_pulse_counter();
@@ -44,6 +48,8 @@ void setup()
 
     // Init i2c scanner
     // scanner.Init();
+
+    // Configure interruptions
     pinMode(interruptPin_pulsecounter, INPUT);
     attachInterrupt(digitalPinToInterrupt(interruptPin_pulsecounter), IR_pulse_counter, RISING);
 }
@@ -56,7 +62,8 @@ void loop()
     {
         last_millis_sensors = actual_millis;
         // rtd0.sample();
-        //  medir niveles de presión y levantar alarma si es que es necesario
+        presure1 = analogRead(analogPin_presure1);
+        presure2 = analogRead(analogPin_presure2);
     }
     if (actual_millis - last_millis_print > 1000) // Serial print every second with usefull information of sensors
     {
@@ -66,6 +73,8 @@ void loop()
         pulse_counter = 0;
         interrupts();
         Serial.println(diff_pulses);
+        Serial.println(presure1);
+        Serial.println(presure2);
     }
 }
 
