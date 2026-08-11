@@ -6,27 +6,32 @@
 #include <PwFusion_MAX31865.h>
 #include "I2CScanner.h"
 
-// CS pin used for the connection with the sensor
-// other connections are controlled by the SPI library
-const int CS_PIN = 9;
+// PINs config
+const int CS_PIN_RTD = 9;
 const int interruptPin_pulsecounter = 2;
 const int analogPin_presure1 = A0;
 const int analogPin_presure2 = A1;
 
-I2CScanner scanner; // not useful for now
-// Create instance of MAX31865 class
+// Classes 
+I2CScanner scanner;
 MAX31865 rtd0;
+
+// handlers 
 unsigned long last_millis_sensors = 0;
 unsigned long last_millis_print = 0;
 unsigned long actual_millis = 0;
 volatile unsigned long int pulse_counter = 0;
 unsigned long int last_pulses = 0;
 unsigned long int diff_pulses = 0;
+
+//Sensor values
 int presure1 = 0;
 int presure2 = 0;
 
+// Function definitions
 void PrintRTDStatus(uint8_t status);
 void IR_pulse_counter();
+
 
 void setup()
 {
@@ -36,15 +41,15 @@ void setup()
     // setup for the the SPI library for max31865
     SPI.begin();
     // initalize the chip select pin for max31865
-    pinMode(CS_PIN, OUTPUT);
+    pinMode(CS_PIN_RTD, OUTPUT);
 
     // configure pt100 sensor - this can be a macro. I'll do it other day
-    // rtd0.begin(CS_PIN, RTD_4_WIRE, RTD_TYPE_PT100);
-    // rtd0.setLowFaultTemperature(10);  // Set the low fault threshold to 30 degrees C
-    // rtd0.setHighFaultTemperature(70); // Set the high fault threshold to 70 degrees C
-    // Serial.println(F("MAX31865 Configured"));
+    rtd0.begin(CS_PIN_RTD, RTD_4_WIRE, RTD_TYPE_PT100);
+    rtd0.setLowFaultTemperature(10);  // Set the low fault threshold to 30 degrees C
+    rtd0.setHighFaultTemperature(70); // Set the high fault threshold to 70 degrees C
+    Serial.println(F("MAX31865 Configured"));
     // give the sensor time to set up
-    // delay(100);
+    delay(100);
 
     // Init i2c scanner
     // scanner.Init();
@@ -72,12 +77,14 @@ void loop()
         diff_pulses = pulse_counter;
         pulse_counter = 0;
         interrupts();
+        rtd0.sample();
         Serial.print(diff_pulses);
         Serial.print(";");
         Serial.print(presure1);
         Serial.print(";");
         Serial.print(presure2);
-        Serial.println(";");
+        Serial.print(";");
+        Serial.println(rtd0.getTemperature());
     }
 }
 
