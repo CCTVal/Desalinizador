@@ -72,9 +72,12 @@ void loop()
         diff_pulses = pulse_counter;
         pulse_counter = 0;
         interrupts();
-        Serial.println(diff_pulses);
-        Serial.println(presure1);
-        Serial.println(presure2);
+        Serial.print(diff_pulses);
+        Serial.print(";");
+        Serial.print(presure1);
+        Serial.print(";");
+        Serial.print(presure2);
+        Serial.println(";");
     }
 }
 
