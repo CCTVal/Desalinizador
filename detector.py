@@ -326,16 +326,15 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
             continue
 
         # 4. Chequeo del núcleo (core) con el umbral más estricto
-        mask = np.zeros((h, w), dtype=np.uint8)
-        contour_roi = contour.copy()
-        contour_roi[:, 0, 0] -= x
-        contour_roi[:, 0, 1] -= y
-        cv2.drawContours(mask, [contour_roi], -1, 255, -1)
-        core_roi = core_thresh[y:y + h, x:x + w]
-        masked_core_pixels = cv2.bitwise_and(core_roi, mask)
+        mask = np.zeros(gray.shape, dtype=np.uint8)
+        cv2.drawContours(mask, [contour], -1, 255, -1) # Draw contour as filled white on black mask
+
+        masked_core_pixels = cv2.bitwise_and(core_thresh, mask)
         core_pixel_count = cv2.countNonZero(masked_core_pixels)
-        core_ratio = core_pixel_count / area if area != 0 else 0
-        if core_ratio < min_core_ratio:
+
+        core_ratio = core_pixel_count / area
+        if core_ratio < (min_core_ratio / 100.0):
+            # print(f"  Contour {i+1} rejected (Core Ratio: {core_ratio:.2f}).")
             continue
 
         detected_circles_info.append({
