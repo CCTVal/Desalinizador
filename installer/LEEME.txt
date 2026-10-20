@@ -10,6 +10,16 @@ Instalación
 No necesita Python ni permisos de administrador. El programa se instala en:
   %LOCALAPPDATA%\Programs\DesalinizadorGotas
 
+Actualizar
+----------
+Descomprima el zip de la versión nueva y ejecute "instalar.bat". Si el
+programa ya está instalado, el instalador muestra la versión instalada y la
+del zip, y ofrece:
+  [A] Actualizar a la versión del zip
+  [D] Desinstalar
+  [S] Salir sin cambios
+Si el programa está abierto, el instalador pide permiso para cerrarlo.
+
 Sin instalar
 ------------
 También puede abrir "DesalinizadorGotas.exe" directamente desde el zip
@@ -17,8 +27,9 @@ descomprimido.
 
 Desinstalar
 -----------
-Borre la carpeta %LOCALAPPDATA%\Programs\DesalinizadorGotas y los accesos
-directos "Analisis de gotas CCTVal" del escritorio y del menú Inicio.
+Ejecute "instalar.bat" y elija [D]. También puede borrar a mano la carpeta
+%LOCALAPPDATA%\Programs\DesalinizadorGotas y los accesos directos
+"Analisis de gotas CCTVal" del escritorio y del menú Inicio.
 
 Nota: la primera vez Windows puede mostrar "Windows protegió su PC" porque el
 programa no está firmado. Pulse "Más información" y luego "Ejecutar de todas

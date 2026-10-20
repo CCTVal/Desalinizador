@@ -23,6 +23,12 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item -LiteralPath $exe -Destination $stage
 Copy-Item -Path (Join-Path $PSScriptRoot "installer\*") -Destination $stage
 
+# Versión que instalar.bat compara con la instalada: fecha del .exe + commit.
+$version = (Get-Item -LiteralPath $exe).LastWriteTime.ToString("yyyy-MM-dd HH:mm")
+$commit = git rev-parse --short HEAD 2>$null
+if ($LASTEXITCODE -eq 0 -and $commit) { $version += " ($commit)" }
+Set-Content -LiteralPath (Join-Path $stage "version.txt") -Value $version -Encoding ASCII
+
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip
 Remove-Item -LiteralPath $stage -Recurse -Force

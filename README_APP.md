@@ -60,10 +60,13 @@ Genera el `.exe` y crea `dist\DesalinizadorGotas_instalador.zip` con:
 - `DesalinizadorGotas.exe` — la aplicación (se puede usar sin instalar).
 - `instalar.bat` — la copia a `%LOCALAPPDATA%\Programs\DesalinizadorGotas` y
   crea accesos directos en el escritorio y en el menú Inicio.
+- `version.txt` — fecha del `.exe` y commit, para detectar actualizaciones.
 - `LEEME.txt` — instrucciones para el usuario final.
 
 En el otro PC: descomprimir el zip y ejecutar `instalar.bat`. No necesita
-Python ni permisos de administrador.
+Python ni permisos de administrador. Si ya hay una versión instalada, el
+instalador muestra ambas versiones y ofrece **Actualizar**, **Desinstalar** o
+**Salir** (y pide cerrar el programa si está abierto).
 
 ### Problemas conocidos al compilar
 
