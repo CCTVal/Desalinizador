@@ -333,8 +333,7 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
         core_pixel_count = cv2.countNonZero(masked_core_pixels)
 
         core_ratio = core_pixel_count / area
-        if core_ratio < (min_core_ratio / 100.0):
-            # print(f"  Contour {i+1} rejected (Core Ratio: {core_ratio:.2f}).")
+        if core_ratio < min_core_ratio:
             continue
 
         detected_circles_info.append({
@@ -344,7 +343,9 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
             "bounding_box": (x, y, w, h),
         })
 
-        core = np.logical_and(core_roi == 255, mask == 255)
+        core_roi = core_thresh[y:y + h, x:x + w]
+        mask_roi = mask[y:y + h, x:x + w]
+        core = np.logical_and(core_roi == 255, mask_roi == 255)
         debug_roi = debug_image[y:y + h, x:x + w]
         debug_roi[core] = RED_COLOR
 

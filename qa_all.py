@@ -4,7 +4,9 @@ Agente de pruebas de la aplicacion COMPLETA.
 Corre, en una sola ejecucion, todas las suites y entrega un reporte unificado:
   1. BACKEND      -> qa_test.py   (deteccion de regla y gotas)
   2. FRONT-END    -> qa_front.py  (UI: pantallas, carga, zoom, etc.)
-  3. INTEGRACION  -> flujo real E2E (calibracion -> gotas -> resultados -> zoom)
+  3. LOTE         -> qa_batch.py  (varias fotos, navegacion y Excel)
+  4. CALCULAR     -> qa_calcular.py (boton Calcular y valores aplicados)
+  5. INTEGRACION  -> flujo real E2E (calibracion -> gotas -> resultados -> zoom)
 
 Devuelve exit code 0 si todo pasa, 1 si hay algun FAIL (para usar en build/CI).
 
@@ -40,6 +42,9 @@ def run_script(label, script):
     if proc.returncode != 0 and proc.stderr:
         print(proc.stderr, end="")
     m = re.search(r"(\d+)\s+PASS,\s+(\d+)\s+FAIL", proc.stdout or "")
+    if not m and proc.stdout.startswith("PASS"):
+        # Suites con asserts: una sola verificación, aprobada por exit code.
+        return (1, 0) if proc.returncode == 0 else (0, 1)
     if not m:
         print(f"  (no se pudo leer el resumen de {script})")
         return 0, 1
@@ -51,6 +56,7 @@ def run_integration():
     import time as _t
     import app
     from detector import detect_ruler_spacing
+    from qa_fixtures import make_drops, make_ruler
 
     print("\n" + "#" * 62)
     print("# INTEGRACION E2E (flujo real con imagenes de prueba)")
@@ -71,8 +77,9 @@ def run_integration():
     a.update()
 
     # 1) Calibracion real con la foto de la regla
-    a.calib_path = "test_ruler_real.jpg"
-    a.ruler = detect_ruler_spacing("test_ruler_real.jpg")
+    ruler_path = make_ruler(60, angle=8)
+    a.calib_path = ruler_path
+    a.ruler = detect_ruler_spacing(ruler_path)
     chk("1. regla detectada", a.ruler.get("ok"),
         f"spacing={a.ruler.get('spacing_px', 0):.1f}px "
         f"conf={a.ruler.get('confidence', 0):.2f}")
@@ -83,9 +90,13 @@ def run_integration():
     chk("3. preview de la regla con marcas", a._ruler_preview() is not None)
 
     # 2) Analisis de gotas con la pantalla de carga (flujo async real)
-    a.drops_path = "test_synth.jpg"
+    a.drops_path = make_drops([20, 30, 40, 50])
+    jobs_before = a._job_seq
     a._submit_drops()
-    chk("4. overlay de carga aparece", a._loading is not None)
+    # El overlay solo aparece si el análisis tarda más de 180 ms; con una
+    # imagen sintética pequeña puede no verse, así que se valida el
+    # lanzamiento del trabajo en segundo plano.
+    chk("4. analisis lanzado en segundo plano", a._job_seq == jobs_before + 1)
     t0 = _t.time()
     while _t.time() - t0 < 5:
         a.update()
@@ -122,7 +133,9 @@ def main():
     total_p = total_f = 0
 
     for label, script in (("BACKEND   (qa_test.py)", "qa_test.py"),
-                          ("FRONT-END (qa_front.py)", "qa_front.py")):
+                          ("FRONT-END (qa_front.py)", "qa_front.py"),
+                          ("LOTE      (qa_batch.py)", "qa_batch.py"),
+                          ("CALCULAR  (qa_calcular.py)", "qa_calcular.py")):
         p, f = run_script(label, script)
         rows.append((label, p, f))
         total_p += p

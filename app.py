@@ -21,6 +21,8 @@ from tkinter import filedialog, messagebox
 import numpy as np
 from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageFilter
 
+import excel_export
+
 # Arrastrar-y-soltar opcional (si tkinterdnd2 está instalado).
 try:
     from tkinterdnd2 import TkinterDnD, DND_FILES
@@ -89,6 +91,33 @@ def _detect_ruler_spacing(*args, **kwargs):
 def _analyze_image(*args, **kwargs):
     from detector import analyze_image
     return analyze_image(*args, **kwargs)
+
+
+def _analyze_batch(paths, darkness_pct, focus_pct, um_per_pixel,
+                   preferred_path=None):
+    """Analiza todas las fotos y conserva la imagen completa solo de la visible."""
+    summaries = {}
+    errors = {}
+    display_path = None
+    display_result = None
+    for path in paths:
+        try:
+            result = _analyze_image(path, darkness_pct=darkness_pct,
+                                    focus_pct=focus_pct,
+                                    um_per_pixel=um_per_pixel)
+        except Exception as exc:
+            errors[path] = str(exc)
+            continue
+        if not result.get("ok"):
+            errors[path] = result.get("error", "Error desconocido")
+            continue
+        summaries[path] = {key: value for key, value in result.items()
+                           if key not in ("original_rgb", "output_rgb", "debug_rgb")}
+        if display_result is None or path == preferred_path:
+            display_path = path
+            display_result = result
+    return {"summaries": summaries, "errors": errors,
+            "display_path": display_path, "display_result": display_result}
 
 
 def resource_path(name):
@@ -525,10 +554,12 @@ class DropZone(tk.Canvas):
     """Zona de carga: borde punteado redondeado, clic para elegir y (si está
     disponible) arrastrar-y-soltar."""
 
-    def __init__(self, master, on_file, width=430, height=158):
+    def __init__(self, master, on_file, width=430, height=158,
+                 multiple=False):
         super().__init__(master, width=width, height=height, bg=CARD,
                          highlightthickness=0, cursor="hand2")
         self.on_file = on_file
+        self.multiple = multiple
         inner = tk.Frame(self, bg=CARD)
         title = tk.Frame(inner, bg=CARD)
         title.pack()
@@ -536,7 +567,7 @@ class DropZone(tk.Canvas):
                  font=(FONT, 11, "bold")).pack(side=tk.LEFT)
         tk.Label(title, text=" tus archivos aquí", bg=CARD, fg=INK,
                  font=(FONT, 11)).pack(side=tk.LEFT)
-        tk.Label(inner, text="(Max. file size 20MB)", bg=CARD, fg=MUTED,
+        tk.Label(inner, text="JPG, PNG, BMP o TIFF", bg=CARD, fg=MUTED,
                  font=(FONT, 9)).pack(pady=(2, 12))
         RoundButton(inner, "Elegir archivos", command=self._choose,
                     kind="light").pack()
@@ -557,16 +588,21 @@ class DropZone(tk.Canvas):
         self.tag_raise(self._win)
 
     def _choose(self):
-        path = filedialog.askopenfilename(title="Seleccionar imagen",
-                                          filetypes=FILETYPES)
-        if path:
-            self.on_file(path)
+        if self.multiple:
+            paths = filedialog.askopenfilenames(
+                title="Seleccionar imágenes", filetypes=FILETYPES)
+            if paths:
+                self.on_file(paths)
+        else:
+            path = filedialog.askopenfilename(title="Seleccionar imagen",
+                                              filetypes=FILETYPES)
+            if path:
+                self.on_file(path)
 
     def _on_drop(self, event):
-        data = event.data.strip()
-        path = data.split("} {")[0].strip("{}")
-        if path:
-            self.on_file(path)
+        paths = self.tk.splitlist(event.data)
+        if paths:
+            self.on_file(paths if self.multiple else paths[0])
 
 
 _Base = TkinterDnD.Tk if _HAS_DND else tk.Tk
@@ -584,6 +620,9 @@ class App(_Base):
 
         self.calib_path = None
         self.drops_path = None
+        self.drops_paths = []
+        self.batch_results = {}
+        self.batch_errors = {}
         self.um_per_pixel = None
         self.ruler = None
         self.result = None
@@ -598,6 +637,8 @@ class App(_Base):
         self.unit_var = tk.StringVar(value="mm")
         self.darkness_var = tk.DoubleVar(value=27.0)
         self.focus_var = tk.DoubleVar(value=80.0)
+        self.applied_darkness = self.darkness_var.get()
+        self.applied_focus = self.focus_var.get()
 
         self.drops_zoom = 1.0
         self.drops_pan = [0.0, 0.0]
@@ -683,11 +724,15 @@ class App(_Base):
                 CARD_GAP * (len(self._cards) - 1)
         else:
             content_h = max(h + 2 * CARD_PAD for (w, h) in sizes)
-        header_h = 120 if self._screen == "results" else HEADER_H
+        header_h = max(
+            120 if self._screen in ("drops", "results") else HEADER_H,
+            self.bg.bbox("hdr")[3] + 24,
+        )
         bottom_gap = 34 if self._screen == "results" else CARD_MARGIN * 2
         y0 = max(header_h + (H - header_h - content_h - bottom_gap) / 2,
-                 header_h - 20)
-        scroll_h = max(H, int(y0 + content_h + CARD_MARGIN * 2))
+                 header_h)
+        trailing_margin = CARD_MARGIN if self._screen == "results" else CARD_MARGIN * 2
+        scroll_h = max(H, int(y0 + content_h + trailing_margin))
         self._paint_gradient(W, scroll_h)
 
         rects = []
@@ -746,6 +791,9 @@ class App(_Base):
     def _on_page_wheel(self, event):
         if not self._scrollable:
             return
+        if event.widget is getattr(self, "drops_list", None) and \
+                len(self.drops_paths) > 5:
+            return
         if getattr(self, "drops_canvas", None) is not None and \
                 event.widget is self.drops_canvas:
             return
@@ -771,14 +819,15 @@ class App(_Base):
             if self.result and hasattr(self, "stats_box"):
                 self._refresh_stats()
         canvas_w = max(340, min(520, int(W * 0.38)))
-        canvas_h = max(180, min(360, H - 440))
+        # Deja espacio para navegación, controles y exportación en ventanas bajas.
+        canvas_h = max(180, min(360, H - 530))
         if int(self.drops_canvas.cget("width")) != canvas_w or \
                 int(self.drops_canvas.cget("height")) != canvas_h:
             self.drops_canvas.configure(width=canvas_w, height=canvas_h)
             self._refresh_drops_image()
         if hasattr(self, "fig"):
             fig_w = max(3.2, min(4.8, (W - canvas_w - 220) / 105))
-            fig_h = max(2.1, min(3.35, canvas_h / 105))
+            fig_h = max(2.0, min(3.1, canvas_h / 120))
             # Solo reconfigurar si el tamaño realmente cambió. Si no, redimensionar
             # la figura (forward=True) reemitiría un <Configure> que vuelve a
             # llamar a _relayout -> bucle de repintado (degradado azul parpadea).
@@ -837,9 +886,9 @@ class App(_Base):
 
     def _draw_header(self, W):
         self.bg.delete("hdr")
-        # En resultados la tarjeta sube hasta la cabecera: logo compacto y arriba.
-        if self._screen == "results":
-            brand, y = self._brand_small, 72
+        # Las pantallas de carga y resultados necesitan espacio para el contenido.
+        if self._screen in ("drops", "results"):
+            brand, y = self._brand_small, 61
         else:
             brand, y = self._brand_big, 108
         self.bg.create_image(W / 2, y, image=brand, tags="hdr")
@@ -1165,11 +1214,34 @@ class App(_Base):
             self._screen = "drops"
             self._clear_cards()
             card = self._new_card()
-            self._card_title(card, "Selecciona la imagen de gotas")
-            DropZone(card, self._on_drops_file, width=420).pack(
-                fill=tk.X, pady=(16, 10))
-            self.drops_chip = tk.Frame(card, bg=CARD)
-            self.drops_chip.pack(fill=tk.X)
+            self._card_title(card, "Selecciona una o varias imágenes de gotas")
+            self.drops_zone = DropZone(card, self._on_drops_files,
+                                       width=420, multiple=True)
+            self.drops_zone.pack(fill=tk.X, pady=(16, 10))
+            self.drops_count_label = tk.Label(card, bg=CARD, fg=HEAD_BLUE,
+                                              font=(FONT, 9, "bold"))
+            self.drops_count_label.pack(anchor=tk.W, pady=(0, 5))
+            files = tk.Frame(card, bg=CARD)
+            files.pack(fill=tk.X)
+            self.drops_list = tk.Listbox(
+                files, height=2, selectmode=tk.EXTENDED, bg="white", fg=INK,
+                selectbackground=PRIMARY, selectforeground="white",
+                relief=tk.FLAT, highlightthickness=1,
+                highlightbackground=BORDER, highlightcolor=PRIMARY,
+                exportselection=False, activestyle="none", font=(FONT, 9))
+            self.drops_list.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.drops_scrollbar = tk.Scrollbar(
+                files, command=self.drops_list.yview)
+            self.drops_list.configure(yscrollcommand=self.drops_scrollbar.set)
+            file_buttons = tk.Frame(card, bg=CARD)
+            file_buttons.pack(fill=tk.X, pady=(8, 0))
+            RoundButton(file_buttons, "Quitar seleccionadas",
+                        command=self._remove_selected_drops,
+                        kind="light").pack(side=tk.LEFT)
+            RoundButton(file_buttons, "Vaciar lista",
+                        command=self._clear_drops_file,
+                        kind="light").pack(side=tk.LEFT, padx=8)
+            self._refresh_drops_list()
             note = ("Calibrado: tamaños en µm." if self.um_per_pixel
                     else "Sin calibración: tamaños en píxeles.")
             tk.Label(card, text=note, bg=CARD, fg=MUTED,
@@ -1183,30 +1255,107 @@ class App(_Base):
 
         self._switch_screen(build)
 
-    def _on_drops_file(self, path):
-        self.drops_path = path
-        self._rebuild_chip(self.drops_chip, path, self._clear_drops_file)
+    def _on_drops_files(self, paths):
+        if isinstance(paths, str):
+            paths = (paths,)
+        known = {os.path.normcase(path) for path in self.drops_paths}
+        missing = []
+        for path in paths:
+            path = os.path.abspath(path)
+            if not os.path.isfile(path):
+                missing.append(os.path.basename(path))
+                continue
+            key = os.path.normcase(path)
+            if key not in known:
+                self.drops_paths.append(path)
+                known.add(key)
+        if self.drops_paths and self.drops_path not in self.drops_paths:
+            self.drops_path = self.drops_paths[0]
+        self.batch_results = {}
+        self.batch_errors = {}
+        self._refresh_drops_list()
+        if missing:
+            messagebox.showwarning("Imágenes", "No se encontraron:\n" +
+                                   "\n".join(missing[:5]))
+
+    def _refresh_drops_list(self):
+        self.drops_list.delete(0, tk.END)
+        for path in self.drops_paths:
+            self.drops_list.insert(tk.END, os.path.basename(path))
+        n = len(self.drops_paths)
+        self.drops_list.configure(height=max(2, min(n, 5)))
+        if n > 5:
+            self.drops_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        else:
+            self.drops_scrollbar.pack_forget()
+        self.drops_count_label.configure(
+            text=f"{n} foto{'s' if n != 1 else ''} seleccionada{'s' if n != 1 else ''}")
+        if not self._switching:
+            self._refresh_layout()
+
+    def _remove_selected_drops(self):
+        selected = self.drops_list.curselection()
+        for index in reversed(selected):
+            del self.drops_paths[index]
+        if self.drops_path not in self.drops_paths:
+            self.drops_path = self.drops_paths[0] if self.drops_paths else None
+        if selected:
+            self.batch_results = {}
+            self.batch_errors = {}
+            self._refresh_drops_list()
 
     def _clear_drops_file(self):
+        self.drops_paths = []
         self.drops_path = None
-        self._rebuild_chip(self.drops_chip, None, None)
+        self.batch_results = {}
+        self.batch_errors = {}
+        self.result = None
+        self._refresh_drops_list()
 
     def _submit_drops(self):
-        if not self.drops_path:
+        if not self.drops_paths and self.drops_path:
+            self.drops_paths = [self.drops_path]
+        if not self.drops_paths:
             messagebox.showwarning("Análisis",
-                                   "Primero suba una foto de gotas.")
+                                   "Primero suba una o varias fotos de gotas.")
             return
         self.drops_zoom = 1.0
         self.drops_pan = [0.0, 0.0]
-        self._run_async(self._analysis_work(), self._on_drops_analyzed,
-                        "Analizando gotas…")
+        self._analyze_drops(f"Analizando {len(self.drops_paths)} fotos…",
+                            self.show_results)
 
-    def _on_drops_analyzed(self, res):
-        if not res.get("ok"):
-            messagebox.showerror("Error", res.get("error", "Error desconocido"))
-            return
-        self.result = res
-        self.show_results()
+    def _analyze_drops(self, text, show, delay=180):
+        """Analiza el lote con los valores actuales de los sliders y, si
+        termina bien, adopta los resultados y llama a `show`.
+
+        Los parámetros se aplican al terminar y no al lanzar el análisis: si
+        este falla, lo mostrado y lo exportado siguen siendo coherentes."""
+        def done(batch):
+            if not batch["display_result"]:
+                self._show_batch_errors(batch["errors"], all_failed=True)
+                return
+            self.batch_results = batch["summaries"]
+            self.batch_errors = batch["errors"]
+            self.drops_path = batch["display_path"]
+            self.result = batch["display_result"]
+            self.applied_darkness, self.applied_focus = batch["params"]
+            self._drops_src = None
+            self._drops_src_arr = None
+            show()
+            if self.batch_errors:
+                self._show_batch_errors(self.batch_errors)
+
+        self._run_async(self._analysis_work(), done, text, delay=delay)
+
+    def _show_batch_errors(self, errors, all_failed=False):
+        details = "\n".join(f"{os.path.basename(path)}: {error}"
+                            for path, error in list(errors.items())[:5])
+        if len(errors) > 5:
+            details += f"\n… y {len(errors) - 5} más."
+        heading = ("No se pudo analizar ninguna foto.\n\n" if all_failed
+                   else f"Se omitieron {len(errors)} fotos.\n\n")
+        (messagebox.showerror if all_failed else messagebox.showwarning)(
+            "Análisis de fotos", heading + details)
 
     # ============================================================ PANTALLA 3
     def show_results(self):
@@ -1218,7 +1367,20 @@ class App(_Base):
                                          fg=HEAD_BLUE,
                                          font=(FONT, 13, "bold"))
             self.result_title.pack(pady=(0, 10))
+            self.result_nav = tk.Frame(card, bg=CARD)
+            RoundButton(self.result_nav, "← Anterior",
+                        command=lambda: self._select_result(-1),
+                        kind="light").pack(side=tk.LEFT)
+            RoundButton(self.result_nav, "Siguiente →",
+                        command=lambda: self._select_result(1),
+                        kind="light").pack(side=tk.RIGHT)
+            self.result_nav_label = tk.Label(
+                self.result_nav, bg=CARD, fg=HEAD_BLUE,
+                font=(FONT, 9, "bold"))
+            self.result_nav_label.pack(side=tk.LEFT, fill=tk.X, expand=True,
+                                       padx=8)
             body = tk.Frame(card, bg=CARD)
+            self.result_body = body
             body.pack(fill=tk.BOTH, expand=True)
 
             left = tk.Frame(body, bg=CARD)
@@ -1248,6 +1410,8 @@ class App(_Base):
             self.zoom_lbl = tk.Label(zoombar, text="100%", bg=CARD, fg=MUTED,
                                      font=(FONT, 9, "bold"), width=6)
             self.zoom_lbl.pack(side=tk.LEFT, padx=8)
+            RoundButton(zoombar, "Calcular", command=self._recalculate,
+                        kind="primary").pack(side=tk.RIGHT)
             self.result_help_lbl = tk.Label(
                 left,
                 text="Rueda: zoom · Arrastrar: mover · Doble clic: ajustar",
@@ -1268,7 +1432,7 @@ class App(_Base):
             self.chart_widget = self.chart_canvas.get_tk_widget()
             btnrow = tk.Frame(right, bg=CARD)
             btnrow.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
-            RoundButton(btnrow, "Cargar nuevo archivo", command=self.show_drops,
+            RoundButton(btnrow, "Añadir fotos", command=self.show_drops,
                         kind="primary").pack(side=tk.RIGHT)
             RoundButton(btnrow, "Exportar Excel", command=self._export_excel,
                         kind="ghost").pack(side=tk.RIGHT, padx=(0, 10))
@@ -1285,35 +1449,54 @@ class App(_Base):
         wrap.pack(fill=tk.X, pady=(8, 0))
         tk.Label(wrap, text=label, bg=CARD, fg=MUTED,
                  font=(FONT, 8, "bold")).pack(anchor=tk.W)
-        Slider(wrap, var, on_release=self._on_slider_release,
-               width=430).pack(fill=tk.X)
+        Slider(wrap, var, width=430).pack(fill=tk.X)
 
-    def _on_slider_release(self):
-        if not self.drops_path:
+    def _recalculate(self):
+        if not self.drops_paths:
             return
-        # delay=0: la pantalla de carga aparece de inmediato y permanece el
-        # tiempo mínimo (LOADING_MIN_MS), estable. Ya no parpadea porque se
-        # eliminó la tormenta de re-layout (ver _relayout / _resize_result_widgets).
-        self._run_async(self._analysis_work(), self._on_slider_analyzed,
-                        "Recalculando…", delay=0)
-
-    def _on_slider_analyzed(self, res):
-        if not res.get("ok"):
-            messagebox.showerror("Error", res.get("error", "Error desconocido"))
-            return
-        self.result = res
-        self._render_results()
+        self._analyze_drops(f"Recalculando {len(self.drops_paths)} fotos…",
+                            self._render_results, delay=0)
 
     # ------------------------------------------------------------- análisis
     def _analysis_work(self):
-        """Captura los parámetros en el hilo principal y devuelve una función
-        sin estado Tk para ejecutar el análisis en un hilo aparte."""
-        path = self.drops_path
+        """Captura parámetros de Tk para analizar el lote fuera del hilo UI."""
+        paths = tuple(self.drops_paths)
+        preferred = self.drops_path
         darkness = self.darkness_var.get()
         focus = self.focus_var.get()
         upp = self.um_per_pixel
-        return lambda: _analyze_image(path, darkness_pct=darkness,
-                                      focus_pct=focus, um_per_pixel=upp)
+        return lambda: {**_analyze_batch(paths, darkness, focus, upp, preferred),
+                        "params": (darkness, focus)}
+
+    def _select_result(self, direction):
+        paths = [path for path in self.drops_paths if path in self.batch_results]
+        if len(paths) < 2:
+            return
+        target = paths[(paths.index(self.drops_path) + direction) % len(paths)]
+        darkness = self.applied_darkness
+        focus = self.applied_focus
+        upp = self.um_per_pixel
+        self._run_async(
+            lambda: _analyze_image(target, darkness_pct=darkness,
+                                   focus_pct=focus, um_per_pixel=upp),
+            lambda res: self._on_result_selected(target, res),
+            f"Cargando {os.path.basename(target)}…")
+
+    def _on_result_selected(self, path, res):
+        if not res.get("ok"):
+            messagebox.showerror("Error", res.get("error", "Error desconocido"))
+            return
+        self.drops_path = path
+        self.result = res
+        self.batch_results[path] = {key: value for key, value in res.items()
+                                    if key not in ("original_rgb", "output_rgb",
+                                                   "debug_rgb")}
+        self._drops_src = None
+        self._drops_src_arr = None
+        self.drops_zoom = 1.0
+        self.drops_pan = [0.0, 0.0]
+        self._render_results()
+        self._update_zoom_label()
 
     # ----------------------------------------------------- pantalla de carga
     def _run_async(self, work, on_done, text="Procesando…", delay=180):
@@ -1441,9 +1624,22 @@ class App(_Base):
     def _render_results(self):
         if not self.result:
             return
+        self._update_result_nav()
         self._refresh_drops_image()
         self._refresh_chart()
         self._refresh_stats()
+
+    def _update_result_nav(self):
+        paths = [path for path in self.drops_paths if path in self.batch_results]
+        if len(paths) < 2:
+            self.result_nav.pack_forget()
+            return
+        if not self.result_nav.winfo_manager():
+            self.result_nav.pack(fill=tk.X, pady=(0, 8),
+                                 before=self.result_body)
+        index = paths.index(self.drops_path) + 1
+        self.result_nav_label.configure(
+            text=f"Foto {index} de {len(paths)} · {os.path.basename(self.drops_path)}")
 
     def _refresh_stats(self):
         for w in self.stats_box.winfo_children():
@@ -1470,6 +1666,15 @@ class App(_Base):
         if self.drops_path:
             _meta_row("Archivo de gotas: ",
                       os.path.basename(self.drops_path))
+        if len(self.drops_paths) > 1:
+            totals = excel_export.batch_totals(self.batch_results)
+            text = (f"{totals['photos']}/{len(self.drops_paths)} fotos · "
+                    f"{totals['count']} gotas")
+            if totals["mean"] is not None:
+                # Mismas cifras globales que el resumen del Excel.
+                text += (f" · promedio {totals['mean']:.0f} {unit}"
+                         f" · desviación {totals['std']:.0f} {unit}")
+            _meta_row("Lote: ", text)
         if self.calib_path:
             _meta_row("Imagen de referencia: ",
                       os.path.basename(self.calib_path))
@@ -1500,12 +1705,11 @@ class App(_Base):
 
     # ------------------------------------------------------- exportar a Excel
     def _export_excel(self):
-        """Guarda el resumen y la tabla por gota en un .xlsx elegido por el
-        usuario (resumen + una fila por gota detectada)."""
+        """Guarda en Excel la foto visible o el lote completo."""
         if not self.result:
             return
-        default = "datos_gotas.xlsx"
-        if self.drops_path:
+        default = "lote_gotas.xlsx" if len(self.drops_paths) > 1 else "datos_gotas.xlsx"
+        if len(self.drops_paths) == 1 and self.drops_path:
             base = os.path.splitext(os.path.basename(self.drops_path))[0]
             default = f"{base}_gotas.xlsx"
         path = filedialog.asksaveasfilename(
@@ -1516,7 +1720,10 @@ class App(_Base):
         if not path:
             return
         try:
-            self._write_excel(path, self.result)
+            if len(self.drops_paths) > 1:
+                self._write_batch_excel(path)
+            else:
+                self._write_excel(path, self.result)
         except ImportError:
             messagebox.showerror(
                 "Exportar",
@@ -1529,88 +1736,28 @@ class App(_Base):
             return
         messagebox.showinfo("Exportar", f"Datos guardados en:\n{path}")
 
+    def _export_info(self):
+        """Datos de la sesión que el Excel necesita (parámetros aplicados)."""
+        return {
+            "title": APP_TITLE,
+            "unit": self.result["unit"],
+            "drops_name": os.path.basename(self.drops_path)
+            if self.drops_path else None,
+            "calib_name": os.path.basename(self.calib_path)
+            if self.calib_path else None,
+            "calib_path": self.calib_path,
+            "um_per_pixel": self.um_per_pixel,
+            "darkness": self.applied_darkness,
+            "focus": self.applied_focus,
+        }
+
     def _write_excel(self, path, res):
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment
-        from openpyxl.utils import get_column_letter
+        excel_export.write_single(path, res, self._export_info())
 
-        unit = res["unit"]
-        upp = self.um_per_pixel
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Gotas"
-
-        head_fill = PatternFill("solid", fgColor="2E31C6")   # índigo CCTVal
-        head_font = Font(bold=True, color="FFFFFF")
-        bold = Font(bold=True)
-
-        ws["A1"] = APP_TITLE
-        ws["A1"].font = Font(bold=True, size=14, color="2E31C6")
-
-        summary = [
-            ("Archivo de gotas",
-             os.path.basename(self.drops_path) if self.drops_path else "—"),
-            ("Imagen de referencia",
-             os.path.basename(self.calib_path) if self.calib_path else "—"),
-            ("Escala", f"{upp:.4f} µm/píxel" if upp
-             else "Sin calibración (píxeles)"),
-            ("Unidad de medida", unit),
-            ("Gotas reconocidas", res["count"]),
-            (f"Tamaño promedio ({unit})", round(res["mean_width"], 2)),
-            (f"Desviación estándar ({unit})", round(res["std_width"], 2)),
-        ]
-        r = 3
-        for key, value in summary:
-            ws.cell(row=r, column=1, value=key).font = bold
-            ws.cell(row=r, column=2, value=value)
-            r += 1
-
-        r += 1
-        headers = ["#", f"Ancho ({unit})", "Ancho (px)", "Alto (px)",
-                   "Área (px²)"]
-        for col, text in enumerate(headers, start=1):
-            cell = ws.cell(row=r, column=col, value=text)
-            cell.fill = head_fill
-            cell.font = head_font
-            cell.alignment = Alignment(horizontal="center")
-        header_row = r
-        r += 1
-        for i, c in enumerate(res.get("circles", []), start=1):
-            wpx = c["max_width"]
-            ws.cell(row=r, column=1, value=i)
-            ws.cell(row=r, column=2,
-                    value=round(wpx * upp, 2) if upp else wpx)
-            ws.cell(row=r, column=3, value=wpx)
-            ws.cell(row=r, column=4, value=c["max_height"])
-            ws.cell(row=r, column=5, value=c["pixel_count"])
-            r += 1
-
-        for col, width in enumerate((6, 16, 12, 12, 14), start=1):
-            ws.column_dimensions[get_column_letter(col)].width = width
-        ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
-
-        # Segunda hoja: distribución de frecuencias (mismos 30 bins que el
-        # histograma de la pantalla de resultados).
-        fs = wb.create_sheet("Frecuencia")
-        f_headers = [f"Ancho desde ({unit})", f"Ancho hasta ({unit})",
-                     "Frecuencia"]
-        for col, text in enumerate(f_headers, start=1):
-            cell = fs.cell(row=1, column=col, value=text)
-            cell.fill = head_fill
-            cell.font = head_font
-            cell.alignment = Alignment(horizontal="center")
-        widths_data = res.get("widths", [])
-        if widths_data:
-            counts, edges = np.histogram(widths_data, bins=30)
-            for i, n in enumerate(counts):
-                fs.cell(row=i + 2, column=1, value=round(float(edges[i]), 2))
-                fs.cell(row=i + 2, column=2, value=round(float(edges[i + 1]), 2))
-                fs.cell(row=i + 2, column=3, value=int(n))
-        for col, width in enumerate((18, 18, 12), start=1):
-            fs.column_dimensions[get_column_letter(col)].width = width
-        fs.freeze_panes = fs.cell(row=2, column=1)
-
-        wb.save(path)
+    def _write_batch_excel(self, path):
+        """Exporta estadísticas y medidas de cada foto del lote."""
+        excel_export.write_batch(path, self.drops_paths, self.batch_results,
+                                 self.batch_errors, self._export_info())
 
     def _refresh_chart(self):
         self.ax.clear()

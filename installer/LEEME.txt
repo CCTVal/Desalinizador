@@ -1,0 +1,25 @@
+Análisis de tamaño de gota - CCTVal
+===================================
+
+Instalación
+-----------
+1. Descomprima este zip completo en cualquier carpeta.
+2. Haga doble clic en "instalar.bat".
+3. Abra "Analisis de gotas CCTVal" desde el escritorio o el menú Inicio.
+
+No necesita Python ni permisos de administrador. El programa se instala en:
+  %LOCALAPPDATA%\Programs\DesalinizadorGotas
+
+Sin instalar
+------------
+También puede abrir "DesalinizadorGotas.exe" directamente desde el zip
+descomprimido.
+
+Desinstalar
+-----------
+Borre la carpeta %LOCALAPPDATA%\Programs\DesalinizadorGotas y los accesos
+directos "Analisis de gotas CCTVal" del escritorio y del menú Inicio.
+
+Nota: la primera vez Windows puede mostrar "Windows protegió su PC" porque el
+programa no está firmado. Pulse "Más información" y luego "Ejecutar de todas
+formas".

@@ -96,10 +96,16 @@ python app.py
 
 **Pestaña 2 · Análisis (gráfico)**
 
-1. **Cargar archivo de gotas**.
-2. Imagen anotada a la izquierda, **histograma** a la derecha.
-3. Sliders **Oscuridad** y **Enfoque** (re-analizan al soltar, con pantalla de
-   carga).
+1. **Elegir archivos** permite seleccionar varias fotos a la vez; también se
+   pueden añadir más fotos después o quitar las seleccionadas de la lista.
+2. **Analizar** procesa todas las fotos con la misma calibración. En resultados,
+   **Anterior** y **Siguiente** muestran la imagen anotada, el histograma y las
+   estadísticas de cada foto.
+3. Los sliders **Oscuridad** y **Enfoque** solo cambian los valores; el botón
+   **Calcular** recalcula el lote completo con ellos. Con varias fotos, la línea
+   **Lote** muestra fotos, gotas totales, promedio y desviación del lote.
+   **Exportar Excel** guarda un resumen por foto, las medidas de todas las gotas
+   y los valores de Oscuridad y Enfoque usados.
 4. **Zoom**: rueda del mouse (centrado en el cursor), botones **+ / − / Ajustar**
    y arrastrar para mover (con límite para que la imagen nunca deje hueco vacío).
 5. Estadísticas: **gotas reconocidas, tamaño promedio y desviación estándar**

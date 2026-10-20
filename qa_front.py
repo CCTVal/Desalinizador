@@ -11,6 +11,7 @@ from PIL import ImageTk
 
 import app
 from detector import detect_ruler_spacing
+from qa_fixtures import make_drops, make_ruler
 
 P = F = 0
 fails = []
@@ -89,16 +90,23 @@ check("light fondo azul claro", st["light"]["fill"] == "#e7ecfb",
 
 print("\n### F) PANTALLA DE CARGA + ASYNC (hilo) ###")
 done = {}
+# El overlay solo aparece si el trabajo dura más que `delay` (180 ms por
+# defecto); este dura 0.4 s, así que debe verse antes de terminar.
 a._run_async(lambda: (time.sleep(0.4) or 99), lambda r: done.__setitem__("r", r),
              "QA en proceso…")
-check("overlay visible al iniciar", a._loading is not None)
-pump(a, 3.0, until=lambda: "r" in done)
+check("overlay oculto en trabajos breves (antes del retardo)",
+      a._loading is None)
+pump(a, 0.3)
+check("overlay visible si el trabajo tarda", a._loading is not None)
+# Tras el callback, el overlay permanece al menos LOADING_MIN_MS.
+pump(a, 3.0, until=lambda: "r" in done and a._loading is None)
 check("callback recibe el resultado", done.get("r") == 99)
 check("overlay oculto al terminar", a._loading is None)
 
 print("\n### G) CALIBRACION: deteccion + preview de marcas ###")
-a.calib_path = "test_ruler_real.jpg"
-a.ruler = detect_ruler_spacing("test_ruler_real.jpg")
+ruler_path = make_ruler(60, angle=8)
+a.calib_path = ruler_path
+a.ruler = detect_ruler_spacing(ruler_path)
 check("regla detectada", a.ruler.get("ok"),
       f"spacing={a.ruler.get('spacing_px',0):.1f} conf={a.ruler.get('confidence',0):.2f}")
 prev = a._ruler_preview()
@@ -108,7 +116,7 @@ check("preview de regla es PhotoImage con marcas",
 
 print("\n### H) ANALISIS DE GOTAS -> PANTALLA DE RESULTADOS ###")
 a.um_per_pixel = None
-a.drops_path = "test_synth.jpg"
+a.drops_path = make_drops([20, 30, 40, 50])
 a._submit_drops()
 pump(a, 4.0, until=lambda: a.result is not None and a._loading is None)
 check("result poblado (ok)", bool(a.result and a.result.get("ok")),
