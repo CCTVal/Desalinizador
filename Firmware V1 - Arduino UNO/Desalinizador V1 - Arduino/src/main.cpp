@@ -48,6 +48,9 @@ float P1_bar=0.0;
 float P2_bar=0.0;
 int valve_status=0; // 0 = closed, 1 = open
 
+int pressure1_window[4] = {0, 0, 0, 0}; // Array to hold the last 4 pressure readings
+int pressure2_window[4] = {0, 0, 0, 0}; // Array to hold the last 4 pressure readings
+
 // Function definitions
 //void PrintRTDStatus(uint8_t status);
 void IR_pulse_counter();
@@ -86,9 +89,23 @@ void loop()
     actual_millis = millis();
     if (actual_millis - last_millis_sensors > 200) // measure sensors every 200ms, is it ok? lets see
     {
-        last_millis_sensors = actual_millis; // update last_millis_sensors
-        presure1 = analogRead(analogPin_presure1);
-        presure2 = analogRead(analogPin_presure2);
+        last_millis_sensors = actual_millis;
+        
+        // Desplazamos las mediciones anteriores a la izquierda
+        pressure1_window[0] = pressure1_window[1];
+        pressure1_window[1] = pressure1_window[2];
+        pressure1_window[2] = pressure1_window[3];
+        
+        // Guardamos la nueva lectura analógica en la última posición
+        pressure1_window[3] = analogRead(analogPin_presure1);
+        
+        // Desplazamos las mediciones anteriores a la izquierda
+        pressure2_window[0] = pressure2_window[1];
+        pressure2_window[1] = pressure2_window[2];
+        pressure2_window[2] = pressure2_window[3];
+        
+        // Guardamos la nueva lectura analógica en la última posición
+        pressure2_window[3] = analogRead(analogPin_presure2);  
     }
     if (actual_millis - last_millis_print > 1000) // Serial print every second with usefull information of sensors
     {
@@ -96,21 +113,35 @@ void loop()
         noInterrupts(); // disable interrupts while reading shared variables
         diff_pulses = pulse_counter;
         pulse_counter = 0;
-        I_presure1_out=(Vref*presure1)/(1023.0*R_med)*1000.0; // convert to mA
-        I_presure2_out=(Vref*presure2)/(1023.0*R_med)*1000.0; // convert to mA
-        P1_bar=I_presure1_out*6.25-25; // convert to bar
-        P2_bar=I_presure2_out*6.25-25; // convert to bar
-        interrupts();
+        interrupts(); 
+    // --- PROMEDIO MÓVIL ---
+        // Sumamos los 4 valores guardados en la ventana
+        long suma_pressure1 = 0;
+        long suma_pressure2 = 0;
+        for (int i = 0; i < 4; i++) {
+          suma_pressure1 += pressure1_window[i];
+          suma_pressure2 += pressure2_window[i];
+        }
+        // Calculamos la media de las lecturas ADC (presure1 promedio)
+        float presure1_avg = suma_pressure1 / 4.0;
+        float presure2_avg = suma_pressure2 / 4.0;  
+
+        // Opcional: Para evitar divisiones por cero o imprecisiones de 1023
+        I_presure1_out = (Vref * presure1_avg) / (1023.0 * R_med) * 1000.0; // mA usando el promedio
+        I_presure2_out = (Vref * presure2_avg) / (1023.0 * R_med) * 1000.0; 
+
+        P1_bar = I_presure1_out * 6.25 - 25; // Bar calculado desde el promedio
+        P2_bar = I_presure2_out * 6.25 - 25;
 
         Serial.print(diff_pulses);
         Serial.print(" , ");
-        Serial.print(presure1);
+        Serial.print(presure1_avg);
         Serial.print(" , ");
         Serial.print(I_presure1_out);
         Serial.print(" , ");
         Serial.print(P1_bar);
         Serial.print(" , ");
-        Serial.print(presure2);
+        Serial.print(presure2_avg);
         Serial.print(" , ");
         Serial.print(I_presure2_out);
         Serial.print(" , ");
