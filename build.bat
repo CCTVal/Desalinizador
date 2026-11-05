@@ -1,5 +1,6 @@
 @echo off
 setlocal
+cd /d "%~dp0"
 
 REM ============================================================
 REM  Genera el ejecutable .exe de la aplicacion del desalinizador
@@ -16,6 +17,12 @@ REM ============================================================
 
 if not "%PYTHON_CMD%"=="" goto check_python
 
+if not exist "build\entorno_instalador\Scripts\python.exe" goto default_python
+set "PYTHON_CMD=build\entorno_instalador\Scripts\python.exe"
+call :check_candidate >nul 2>nul
+if not errorlevel 1 goto check_python
+
+:default_python
 set "PYTHON_CMD=python"
 call :check_candidate >nul 2>nul
 if not errorlevel 1 goto check_python
@@ -56,22 +63,7 @@ if errorlevel 1 (
 
 echo.
 echo Generando ejecutable...
-%PYTHON_CMD% -m PyInstaller --noconfirm --clean --onefile --windowed ^
-  --name "DesalinizadorGotas" ^
-  --icon "assets\cctval_icon.ico" ^
-  --hidden-import "matplotlib.backends.backend_tkagg" ^
-  --collect-data matplotlib ^
-  --add-data "assets;assets" ^
-  --exclude-module PyQt5 ^
-  --exclude-module PyQt6 ^
-  --exclude-module PySide2 ^
-  --exclude-module PySide6 ^
-  --exclude-module IPython ^
-  --exclude-module notebook ^
-  --exclude-module sphinx ^
-  --exclude-module vtk ^
-  --exclude-module vtkmodules ^
-  app.py
+%PYTHON_CMD% packaging\build_app.py
 
 if errorlevel 1 (
   echo.
@@ -92,5 +84,5 @@ echo ============================================================
 exit /b 0
 
 :check_candidate
-%PYTHON_CMD% -c "import tkinter as tk; root=tk.Tk(); root.destroy(); import cv2, numpy, matplotlib, PIL" >nul 2>nul
+%PYTHON_CMD% -c "import tkinter as tk; root=tk.Tk(); root.destroy(); import cv2, numpy, matplotlib, PIL, openpyxl, PyInstaller" >nul 2>nul
 exit /b %errorlevel%

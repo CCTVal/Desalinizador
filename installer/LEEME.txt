@@ -1,36 +1,23 @@
 Análisis de tamaño de gota - CCTVal
 ===================================
 
-Instalación
------------
-1. Descomprima este zip completo en cualquier carpeta.
-2. Haga doble clic en "instalar.bat".
-3. Abra "Analisis de gotas CCTVal" desde el escritorio o el menú Inicio.
+1. Descomprima el archivo completo.
+2. Abra Instalar_DesalinizadorGotas.exe.
+3. Pulse Elegir carpeta para seleccionar la ubicación del programa.
+4. Pulse Instalar programa y, al finalizar, Abrir programa.
 
-No necesita Python ni permisos de administrador. El programa se instala en:
+Para actualizar una copia existente, use Elegir carpeta y seleccione la carpeta
+que contiene DesalinizadorGotas.exe. Se habilitará Actualizar programa.
+El instalador recuerda la ubicación después de instalar o actualizar.
+Cierre Análisis de gotas antes de actualizar o desinstalar.
+
+También se crean accesos directos en el escritorio y el menú Inicio.
+La ventana permite desinstalar conservando sus imágenes, resultados y otros
+archivos personales que haya guardado en la carpeta del programa.
+
+La carpeta predeterminada es:
   %LOCALAPPDATA%\Programs\DesalinizadorGotas
+Puede elegir otra carpeta en la que tenga permisos de escritura.
 
-Actualizar
-----------
-Descomprima el zip de la versión nueva y ejecute "instalar.bat". Si el
-programa ya está instalado, el instalador muestra la versión instalada y la
-del zip, y ofrece:
-  [A] Actualizar a la versión del zip
-  [D] Desinstalar
-  [S] Salir sin cambios
-Si el programa está abierto, el instalador pide permiso para cerrarlo.
-
-Sin instalar
-------------
-También puede abrir "DesalinizadorGotas.exe" directamente desde el zip
-descomprimido.
-
-Desinstalar
------------
-Ejecute "instalar.bat" y elija [D]. También puede borrar a mano la carpeta
-%LOCALAPPDATA%\Programs\DesalinizadorGotas y los accesos directos
-"Analisis de gotas CCTVal" del escritorio y del menú Inicio.
-
-Nota: la primera vez Windows puede mostrar "Windows protegió su PC" porque el
-programa no está firmado. Pulse "Más información" y luego "Ejecutar de todas
-formas".
+No necesita Python ni conexión a Internet.
+instalar.bat es una alternativa para abrir la misma ventana gráfica.

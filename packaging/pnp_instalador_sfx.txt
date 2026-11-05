@@ -1,0 +1,7 @@
+;The comment below contains SFX script commands
+Title=Instalar conversor de componentes CCTVal
+Text=Instala el conversor de archivos CSV de componentes y crea accesos directos.
+Path=%LOCALAPPDATA%\Programs\CCTVal\ConversorPnP
+Setup=<>
+Shortcut=P,ConversorPnP.exe,CCTVal,Conversor de componentes CCTVal,Conversor de componentes CCTVal
+Shortcut=D,ConversorPnP.exe,,Conversor de componentes CCTVal,Conversor de componentes CCTVal
