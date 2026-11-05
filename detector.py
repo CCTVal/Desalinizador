@@ -303,6 +303,8 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
     detected_circles_info = []
     output_image = image.copy()  # imagen con cajas y datos
     debug_image = image.copy()   # imagen con las gotas pintadas
+    d3 = 0
+    d2 = 0
 
     for contour in contours:
         area = cv2.contourArea(contour)
@@ -343,6 +345,9 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
             "bounding_box": (x, y, w, h),
         })
 
+        d3 += w*w*w
+        d2 += w*w
+
         core_roi = core_thresh[y:y + h, x:x + w]
         mask_roi = mask[y:y + h, x:x + w]
         core = np.logical_and(core_roi == 255, mask_roi == 255)
@@ -381,4 +386,6 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
         "original_rgb": cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
         "output_rgb": cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB),
         "debug_rgb": cv2.cvtColor(debug_image, cv2.COLOR_BGR2RGB),
+        "d3": d3,
+        "d2": d2,
     }

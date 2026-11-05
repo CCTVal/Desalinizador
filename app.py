@@ -1693,7 +1693,8 @@ class App(_Base):
 
         rows = [("Gotas reconocidas: ", f"{res['count']}"),
                 ("Tamaño promedio: ", f"{res['mean_width']:.0f} {unit}"),
-                ("Desviación estándar: ", f"{res['std_width']:.0f} {unit}")]
+                ("Desviación estándar: ", f"{res['std_width']:.0f} {unit}"),
+                ("Diámetro de Sauter: ", f"{res['d3']/res['d2'] if res['d2'] != 0 else 0:.0f} {unit}")]
         for prefix, value in rows:
             row = tk.Frame(self.stats_box, bg=CARD)
             row.pack(anchor=tk.W, pady=row_pady)
