@@ -12,12 +12,15 @@ def batch_totals(batch_results):
     """Totales globales del lote: se muestran en pantalla y en el Excel."""
     widths = [width for image in batch_results.values()
               for width in image["widths"]]
+    d3 = sum(image["d3"] for image in batch_results.values())
+    d2 = sum(image["d2"] for image in batch_results.values())
     return {
         "photos": len(batch_results),
         "count": sum(image["count"] for image in batch_results.values()),
         "mean": float(np.mean(widths)) if widths else None,
         "std": float(np.std(widths)) if widths else None,
         "widths": widths,
+        "sauter": d3 / d2 if d2 else 0.0,
     }
 
 
@@ -52,6 +55,8 @@ def write_single(path, res, info):
         ("Gotas reconocidas", res["count"]),
         (f"Tamaño promedio ({unit})", round(res["mean_width"], 2)),
         (f"Desviación estándar ({unit})", round(res["std_width"], 2)),
+        (f"Diámetro de Sauter ({unit})",
+         round(res["d3"] / res["d2"], 2) if res["d2"] else 0),
     ]
     r = 3
     for key, value in summary:
@@ -132,6 +137,7 @@ def write_batch(path, drops_paths, batch_results, batch_errors, info):
          if totals["mean"] is not None else 0),
         (f"Desviación global ({unit})", round(totals["std"], 2)
          if totals["std"] is not None else 0),
+        (f"Diámetro de Sauter ({unit})", round(totals["sauter"], 2)),
         ("Escala", f"{upp:.4f} µm/píxel" if upp
          else "Sin calibración (píxeles)"),
         ("Oscuridad (%)", round(info["darkness"], 1)),

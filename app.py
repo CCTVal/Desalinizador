@@ -827,7 +827,8 @@ class App(_Base):
             self._refresh_drops_image()
         if hasattr(self, "fig"):
             fig_w = max(3.2, min(4.8, (W - canvas_w - 220) / 105))
-            fig_h = max(2.0, min(3.1, canvas_h / 120))
+            # Reserva altura para Sauter por foto y global sin ocultar exportar.
+            fig_h = max(1.6, min(3.1, (canvas_h - 60) / 120))
             # Solo reconfigurar si el tamaño realmente cambió. Si no, redimensionar
             # la figura (forward=True) reemitiría un <Configure> que vuelve a
             # llamar a _relayout -> bucle de repintado (degradado azul parpadea).
@@ -1675,6 +1676,8 @@ class App(_Base):
                 text += (f" · promedio {totals['mean']:.0f} {unit}"
                          f" · desviación {totals['std']:.0f} {unit}")
             _meta_row("Lote: ", text)
+            _meta_row("Diámetro de Sauter global: ",
+                      f"{totals['sauter']:.2f} {unit}")
         if self.calib_path:
             _meta_row("Imagen de referencia: ",
                       os.path.basename(self.calib_path))

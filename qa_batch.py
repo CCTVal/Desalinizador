@@ -12,6 +12,7 @@ import numpy as np
 from openpyxl import load_workbook
 
 import app
+from qa_calcular import label_texts
 
 
 def make_image(path, centers):
@@ -51,6 +52,7 @@ def main():
         partial = app._analyze_batch((first, missing), 40, 50, 2.0)
         assert list(partial["summaries"]) == [first]
         assert missing in partial["errors"]
+        assert app.excel_export.batch_totals(partial["summaries"])["sauter"] > 0
 
         window = app.App()
         try:
@@ -93,12 +95,30 @@ def main():
                 assert window.batch_results[first]["count"] == 1
                 assert window.batch_results[second]["count"] == 2
 
+            total_widths = [w for res in window.batch_results.values()
+                            for w in res["widths"]]
+            expected_sauter = (sum(w ** 3 for w in total_widths) /
+                               sum(w ** 2 for w in total_widths))
+            rows = window.stats_box.winfo_children()
+            lot_index = next(i for i, row in enumerate(rows)
+                             if "Lote: " in label_texts(row))
+            sauter_row = label_texts(rows[lot_index + 1])
+            assert sauter_row == ["Diámetro de Sauter global: ",
+                                  f"{expected_sauter:.2f} µm"], sauter_row
+
+            # Los valores pendientes de los sliders no deben alterar el Excel.
+            window.darkness_var.set(5)
+            window.focus_var.set(95)
             window._write_batch_excel(workbook)
             book = load_workbook(workbook, data_only=True)
             try:
                 assert book["Resumen"]["B2"].value == 2
                 assert book["Resumen"]["B4"].value == 3
                 labels = sheet_labels(book["Resumen"])
+                assert labels["Diámetro de Sauter (µm)"] == round(expected_sauter, 2)
+                ordered_labels = list(labels)
+                assert ordered_labels.index("Diámetro de Sauter (µm)") == (
+                    ordered_labels.index("Desviación global (µm)") + 1)
                 assert labels["Oscuridad (%)"] == round(window.applied_darkness, 1)
                 assert labels["Enfoque (%)"] == round(window.applied_focus, 1)
                 assert book["Gotas"].max_row == 4
@@ -108,6 +128,8 @@ def main():
             del book
             gc.collect()
 
+            window.darkness_var.set(window.applied_darkness)
+            window.focus_var.set(window.applied_focus)
             window.show_drops()
             window.drops_list.selection_set(0)
             window._remove_selected_drops()
@@ -117,12 +139,17 @@ def main():
                  len(window.batch_results) == 1 and window._loading is None)
             assert window.result["count"] == 2
             assert not window.result_nav.winfo_manager()
+            window.darkness_var.set(5)
+            window.focus_var.set(95)
             window._write_excel(single_workbook, window.result)
             book = load_workbook(single_workbook, data_only=True)
             try:
                 assert book.sheetnames == ["Gotas", "Frecuencia"]
                 assert book["Gotas"]["B3"].value == "foto_2.png"
                 single_labels = sheet_labels(book["Gotas"])
+                res = window.result
+                assert single_labels["Diámetro de Sauter (µm)"] == (
+                    round(res["d3"] / res["d2"], 2))
                 assert single_labels["Oscuridad (%)"] == round(window.applied_darkness, 1)
                 assert single_labels["Enfoque (%)"] == round(window.applied_focus, 1)
             finally:

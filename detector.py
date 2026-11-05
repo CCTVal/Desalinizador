@@ -272,6 +272,8 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
         min_circularity: circularidad mínima exigida (1 = círculo perfecto).
 
     Devuelve un diccionario (ver claves al final de la función).
+    d3 y d2 son las sumas de los diámetros al cubo y al cuadrado,
+    en la unidad de salida elevada a la potencia correspondiente.
     """
     image = _imread(image_path)
     if image is None:
@@ -303,8 +305,6 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
     detected_circles_info = []
     output_image = image.copy()  # imagen con cajas y datos
     debug_image = image.copy()   # imagen con las gotas pintadas
-    d3 = 0
-    d2 = 0
 
     for contour in contours:
         area = cv2.contourArea(contour)
@@ -345,9 +345,6 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
             "bounding_box": (x, y, w, h),
         })
 
-        d3 += w*w*w
-        d2 += w*w
-
         core_roi = core_thresh[y:y + h, x:x + w]
         mask_roi = mask[y:y + h, x:x + w]
         core = np.logical_and(core_roi == 255, mask_roi == 255)
@@ -370,6 +367,8 @@ def analyze_image(image_path, darkness_pct=27.0, focus_pct=80.0,
 
     mean_width = float(np.mean(widths)) if widths else 0.0
     std_width = float(np.std(widths)) if widths else 0.0
+    d3 = sum(w ** 3 for w in widths)
+    d2 = sum(w ** 2 for w in widths)
 
     return {
         "ok": True,

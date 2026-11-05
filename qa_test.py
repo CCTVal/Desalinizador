@@ -91,11 +91,21 @@ check("media/std correctas",
       abs(res["mean_width"] - np.mean(res["widths"])) < 0.01 and
       abs(res["std_width"] - np.std(res["widths"])) < 0.01,
       f"media={res['mean_width']:.1f} std={res['std_width']:.1f}")
+check("d3 y d2 usan diametros calibrados",
+      np.isclose(res["d3"], sum(w ** 3 for w in res["widths"])) and
+      np.isclose(res["d2"], sum(w ** 2 for w in res["widths"])))
+expected_px = (sum(w ** 3 for w in res["widths_px"]) /
+               sum(w ** 2 for w in res["widths_px"]))
+check("Sauter calibrado convierte px a um una sola vez",
+      np.isclose(res["d3"] / res["d2"], expected_px * upp))
 
 print("\n### H) SIN CALIBRACION -> unidad px ###")
 res = analyze_image(make_drops([20, 24]), darkness_pct=40, focus_pct=50)
 check("unidad = px sin calibracion", res["unit"] == "px", res["unit"])
 check("widths == widths_px sin calib", res["widths"] == res["widths_px"])
+check("d3 y d2 sin calibracion usan pixeles",
+      res["d3"] == sum(w ** 3 for w in res["widths_px"]) and
+      res["d2"] == sum(w ** 2 for w in res["widths_px"]))
 
 print("\n### I) FILTRO max_area (gota grande se descarta) ###")
 res = analyze_image(make_drops([20, 50]), darkness_pct=40, focus_pct=50)
@@ -133,6 +143,19 @@ empty = os.path.join(TMP, "empty.jpg"); cv2.imwrite(empty, np.full((300, 300, 3)
 res = analyze_image(empty, darkness_pct=40, focus_pct=50)
 check("sin gotas count=0", res["ok"] and res["count"] == 0,
       f"count={res['count']} media={res['mean_width']}")
+check("sin gotas d3=d2=0", res["d3"] == res["d2"] == 0)
+
+print("\n### O) SAUTER GLOBAL: SUMA DE MOMENTOS ###")
+from excel_export import batch_totals
+unequal = {
+    "foto_1": {"count": 1, "widths": [10], "d3": 1000, "d2": 100},
+    "foto_2": {"count": 2, "widths": [20, 30], "d3": 35000, "d2": 1300},
+}
+check("Sauter global pondera todas las gotas",
+      np.isclose(batch_totals(unequal)["sauter"], 36000 / 1400))
+check("lote vacio Sauter=0", batch_totals({})["sauter"] == 0)
+check("lote sin gotas Sauter=0",
+      batch_totals({"vacia": res})["sauter"] == 0)
 
 print("\n" + "=" * 55)
 print(f"RESULTADO: {P} PASS, {F} FAIL")

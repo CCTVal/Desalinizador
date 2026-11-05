@@ -107,5 +107,12 @@ ejecutable anterior; la desinstalación conserva los archivos personales.
 5. Los controles **Oscuridad** y **Enfoque** solo cambian los valores; el botón
    **Calcular** (junto al zoom) recalcula todas las fotos con ellos. Con varias
    fotos, la línea **Lote** muestra los totales del lote.
+   Justo debajo aparece el **Diámetro de Sauter global**, calculado como
+   Σd³ / Σd² de todas las gotas de las fotos analizadas (no como promedio
+   de los diámetros de Sauter por foto). Se muestra en µm si hay calibración,
+   o en px si no la hay; sin gotas se informa 0.
 6. **Exportar Excel** guarda las medidas, el resumen de todo el lote y los
-   valores de Oscuridad y Enfoque usados.
+   valores de Oscuridad y Enfoque usados en el último análisis confirmado.
+   En el resumen global, **Diámetro de Sauter (µm)** aparece inmediatamente
+   después de **Desviación global (µm)** (ambos en px sin calibración).
+   La exportación de una sola foto también incluye su diámetro de Sauter.
