@@ -1,0 +1,101 @@
+@import '../.agents/skills/anatomy/kit/iso.css';
+
+:root { font-family: 'Segoe UI', sans-serif; color-scheme: light; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--anatomy-strong); background: var(--anatomy-page); }
+main { max-width: 1440px; margin: auto; padding: 24px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+h1 { margin: 0; font-size: 28px; font-weight: 550; letter-spacing: -.025em; }
+#viewer-title { font-family: var(--anatomy-mono); font-size: 12px; color: var(--anatomy-text); }
+.viewer-shell { overflow: hidden; border: 1px solid var(--anatomy-faint); border-radius: 12px; background: var(--anatomy-card); }
+#viewport { height: clamp(360px, 68vh, 800px); position: relative; touch-action: none; }
+#viewport canvas { display: block; width: 100%; height: 100%; }
+.valve-marker { position: absolute; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 10px 14px; min-height: 46px; border: 1px solid #d4dfe1; border-radius: 10px; background: #fff; color: #183c44; text-align: left; white-space: nowrap; }
+.valve-marker[hidden] { display: none; }
+.valve-name { font-size: 13px; font-weight: 600; line-height: 1.2; }
+.valve-switch { display: block; flex: none; width: 40px; height: 24px; padding: 3px; border-radius: 12px; background: #0099ad; }
+.valve-thumb { display: block; width: 18px; height: 18px; border-radius: 50%; background: #fff; transform: translateX(16px); }
+#bypass-state-label { min-width: 45px; font-size: 12px; color: #4b6268; }
+.valve-marker[aria-checked="false"] .valve-switch { background: #78868a; }
+.valve-marker[aria-checked="false"] .valve-thumb { transform: translateX(0); }
+.valve-marker:hover:not(:disabled) { border-color: #77b9c4; background: #f8fcfd; }
+.valve-marker:focus-visible { outline-color: #236574; }
+@media (hover: hover) and (pointer: fine) {
+  .valve-marker { opacity: 0; pointer-events: none; }
+  #viewport[data-valve-hovered="true"] .valve-marker,
+  .valve-marker:focus-visible { opacity: 1; pointer-events: auto; }
+}
+#loading { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; background: var(--anatomy-card); color: var(--anatomy-text); }
+#loading[hidden] { display: none; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 20px; border-top: 1px solid var(--anatomy-faint); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.zoom-control { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+#zoom { width: clamp(100px, 22vw, 280px); accent-color: var(--anatomy-strong); cursor: pointer; }
+#zoom-value { min-width: 50px; font-variant-numeric: tabular-nums; }
+button { min-height: 44px; padding: 9px 18px; font: inherit; font-size: 14px; border: 1px solid var(--anatomy-faint); border-radius: 6px; color: var(--anatomy-strong); background: var(--anatomy-card); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+button:hover:not(:disabled) { border-color: var(--anatomy-mid); }
+button[aria-pressed="true"] { background: var(--anatomy-strong); color: var(--anatomy-card); border-color: var(--anatomy-strong); }
+button:disabled, input:disabled { opacity: .42; cursor: default; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.simulation-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
+.scene-panel { display: flex; flex-direction: column; min-width: 0; align-self: start; position: sticky; top: 16px; }
+.scene-panel #viewport { flex: initial; min-height: 440px; }
+#pump-controls { padding: 20px; border-left: 1px solid var(--anatomy-faint); }
+#pump-info, #sensor-info { position: fixed; z-index: 20; width: 264px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 12px 14px; border: 1px solid #69c5d5; border-radius: 8px; background: #effbfd; color: #173f49; font-size: 12px; line-height: 1.5; text-align: left; }
+#pump-info h3, #sensor-info h3 { font-size: 14px; margin: 0 0 8px; font-weight: 600; }
+#pump-specifications, #sensor-specifications { margin: 0; }
+#pump-specifications > div, #sensor-specifications > div { display: flex; justify-content: space-between; gap: 12px; margin: 4px 0; }
+#pump-specifications dt, #sensor-specifications dt { color: #35616b; }
+#pump-specifications dd, #sensor-specifications dd { margin: 0; text-align: right; }
+#pump-info-status { margin: 9px 0 0; }
+.pump-info-note { font-size: 10px; color: #35616b; margin: 7px 0 0; }
+.pump-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.pump-heading h2 { margin: 0 0 7px; font-size: 18px; font-weight: 600; }
+.pump-heading p, .model-note, #pump-status, .chart-legend { font-size: 12px; line-height: 1.6; color: var(--anatomy-text); }
+.pump-heading p { margin: 0; }
+.pump-layout { display: block; }
+.pump-inputs>label { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; margin-top: 14px; }
+.pump-inputs>input { width: 100%; margin: 14px 0; accent-color: var(--anatomy-strong); }
+.pump-inputs details { font-size: 12px; line-height: 1.6; color: var(--anatomy-text); margin-top: 12px; }
+summary { cursor: pointer; padding: 8px 0; }
+.pump-inputs details label { display: grid; gap: 6px; margin: 10px 0; }
+.pump-inputs details input { max-width: 160px; padding: 8px; border: 1px solid var(--anatomy-faint); border-radius: 6px; font: inherit; font-size: 16px; }
+.pump-results dl { margin: 14px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.pump-results dt { font-size: 12px; color: var(--anatomy-text); }
+.pump-results dd { font-size: 18px; margin: 5px 0 0; font-variant-numeric: tabular-nums; }
+.sensor-readings { padding-bottom: 16px; border-bottom: 1px solid var(--anatomy-faint); }
+.sensor-readings h3 { font-size: 16px; margin: 16px 0 8px; }
+.sensor-readings button { padding: 4px 0; border: 0; background: transparent; text-align: left; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.pump-results .sensor-range { font-size: 12px; line-height: 1.5; color: var(--anatomy-text); }
+.thermal-settings { font-size: 12px; }
+.thermal-settings label { display: grid; gap: 6px; margin: 10px 0; }
+.thermal-settings input { width: 100%; padding: 8px; border: 1px solid var(--anatomy-faint); border-radius: 6px; font: inherit; font-size: 16px; }
+.reading-source, .serial-settings label { display: grid; gap: 6px; margin: 12px 0; font-size: 12px; }
+.reading-source select, .serial-settings select { max-width: 100%; width: 100%; min-width: 0; padding: 8px; font: inherit; font-size: 16px; background: var(--anatomy-card); color: var(--anatomy-strong); border: 1px solid var(--anatomy-faint); border-radius: 6px; }
+.serial-settings { font-size: 12px; }
+.serial-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.serial-actions button { border: 1px solid var(--anatomy-faint); padding: 6px 10px; text-decoration: none; }
+#sensor-live-reading { font-size: 16px; font-variant-numeric: tabular-nums; }
+#pump-chart { display: block; width: 100%; max-width: 480px; }
+#pump-chart text { fill: var(--anatomy-text); font: 11px 'Segoe UI', sans-serif; }
+.chart-axis { stroke: var(--anatomy-mid); fill: none; }
+.curve-pump { stroke: #258db8; stroke-width: 2.5; fill: none; }
+.curve-system { stroke: #9b7131; stroke-width: 2; fill: none; }
+#pump-duty-point { fill: var(--anatomy-strong); stroke: var(--anatomy-card); stroke-width: 1.5; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.chart-legend a { color: inherit; text-underline-offset: 3px; }
+#pump-status { color: var(--anatomy-strong); }
+@media (max-width: 900px) { .simulation-layout { grid-template-columns: 1fr; } .scene-panel { position: static; } #pump-controls { border-left: 0; border-top: 1px solid var(--anatomy-faint); } .pump-layout { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(240px, 1fr); gap: 22px; } .scene-panel #viewport { min-height: 360px; flex: initial; height: 52vh; } }
+@media (max-width: 650px) { .pump-layout { display: block; } #pump-controls { padding: 16px 14px; } }
+#pieces-panel { border-top: 1px solid var(--anatomy-faint); padding: 16px 20px; }
+#pieces-panel>label { margin-right: 10px; font-size: 14px; }
+#piece { max-width: 100%; padding: 9px; font: inherit; font-size: 14px; border: 1px solid var(--anatomy-faint); border-radius: 6px; background: var(--anatomy-card); color: var(--anatomy-strong); }
+.isolate-label { display: flex; align-items: center; gap: 8px; margin: 14px 0; font-size: 13px; }
+.position-fields { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
+.position-fields label { display: grid; gap: 5px; font-size: 12px; }
+.position-fields input { width: 110px; padding: 9px; font: inherit; font-size: 16px; border: 1px solid var(--anatomy-faint); border-radius: 6px; background: var(--anatomy-card); color: var(--anatomy-strong); }
+#pieces-panel p { font-size: 12px; color: var(--anatomy-text); line-height: 1.6; margin-bottom: 0; }
+:focus-visible { outline: 2px solid var(--anatomy-strong); outline-offset: 4px; }
+::selection { color: var(--anatomy-card); background: var(--anatomy-strong); }
+footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 14px; font-size: 12px; line-height: 1.6; color: var(--anatomy-text); }
+@media (max-width: 600px) { main { padding: 16px 12px; } .toolbar { padding: 14px; gap: 14px; flex-wrap: wrap; } .zoom-control { flex: 1; } #zoom { flex: 1; min-width: 90px; } footer { flex-direction: column; gap: 4px; } }

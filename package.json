@@ -1,0 +1,12 @@
+{
+  "name": "gemelo-digital-planta",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "convert": "node scripts/convert-step.cjs",
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1"
+  },
+  "dependencies": { "three": "^0.180.0" },
+  "devDependencies": { "occt-import-js": "0.0.23", "vite": "^6.4.1" }
+}

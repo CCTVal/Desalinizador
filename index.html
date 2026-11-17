@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f2f2ef" />
+  <title>Planta · Agua</title>
+</head>
+<body class="iso" data-theme="light">
+  <main>
+    <header><h1>Planta</h1><span id="viewer-title">P23.00-00-A008v2</span></header>
+    <section class="viewer-shell" aria-label="Planta y salida de agua">
+      <div class="simulation-layout"><div class="scene-panel">
+      <div id="viewport" tabindex="0" role="region" aria-label="Visor de la planta. Arrastra para girar; botón derecho para desplazar. Usa la rueda o pellizca para acercar. Teclas más y menos para zoom.">
+        <div id="loading" role="status">Cargando la planta…</div>
+        <button id="bypass-toggle" class="valve-marker" type="button" role="switch" aria-checked="true" aria-label="Llave 167 de descarga" disabled>
+          <span class="valve-name">Llave 167</span>
+          <span class="valve-switch" aria-hidden="true"><span class="valve-thumb"></span></span>
+          <span id="bypass-state-label">Abierta</span>
+        </button>
+        <section id="pump-info" hidden role="tooltip" aria-labelledby="pump-info-title">
+          <h3 id="pump-info-title">WDM VSSE 1-23</h3>
+          <dl id="pump-specifications"></dl>
+          <p id="pump-info-status"></p>
+          <p class="pump-info-note">Datos nominales · estado simulado<br>Asociación CAD provisional</p>
+        </section>
+        <section id="sensor-info" hidden role="tooltip" aria-labelledby="sensor-info-title">
+          <h3 id="sensor-info-title"></h3>
+          <dl id="sensor-specifications"></dl>
+          <p id="sensor-live-reading"></p>
+          <p id="sensor-live-status"></p>
+          <p id="sensor-source-note">Lectura simulada · escenario matemático.</p>
+        </section>
+      </div>
+      <div class="toolbar">
+        <div class="zoom-control"><label for="zoom">Zoom</label><input id="zoom" type="range" min="50" max="400" step="5" value="100" disabled /><output id="zoom-value" for="zoom">100 %</output></div>
+        <button id="frame-view" disabled>Encuadrar</button>
+        <button id="rotate-view" aria-pressed="false" disabled>Girar planta</button>
+      </div>
+      </div>
+      <fieldset id="pump-controls" disabled>
+        <div class="pump-heading"><div><h2>Bomba WDM VSSE 1-23</h2><p>Motor nominal 1,1 kW · 380 V · 50 Hz · conexiones DN32</p></div><button id="pump-toggle" aria-pressed="false">Encender bomba</button></div>
+          <p class="model-note">Controles y animación: simulación estacionaria con curva WDM y circuito supuesto. Presiones locales según cotas CAD y pérdidas supuestas; tomas pendientes de validar. La frecuencia supone un variador simulado. Estos controles no actúan sobre la planta.</p>
+          <p class="model-note">Pulsa la llave 167 o su etiqueta para abrir o cerrar la descarga. Al cerrarla, el aspersor sigue recibiendo agua. Presión y reparto estimados con resistencias supuestas; gotas ilustrativas.</p>
+        <div class="pump-layout">
+          <div class="pump-inputs">
+            <label for="pump-frequency">Frecuencia simulada <output id="frequency-value" for="pump-frequency">50 Hz</output></label>
+            <input id="pump-frequency" type="range" min="0" max="50" step="1" value="50" />
+            <label for="valve-opening">Apertura de la llave de alimentación <output id="valve-value" for="valve-opening">0 %</output></label>
+            <input id="valve-opening" type="range" min="0" max="100" step="1" value="0" />
+            <details><summary>Supuestos del circuito</summary><label for="static-head">Carga estática (mca)<input id="static-head" type="number" min="0" step="0.1" value="1" /></label><label for="circuit-loss">Pérdida a 1 m³/h (mca)<input id="circuit-loss" type="number" min="0" step="1" value="40" /></label><p>La pérdida aumenta con Q². El efecto de apertura de la llave es aproximado; estas pérdidas todavía no están calibradas con la planta.</p></details>
+          </div>
+          <div class="pump-results">
+            <section class="sensor-readings" aria-labelledby="sensor-readings-title">
+              <h3 id="sensor-readings-title">Sensores · lecturas simuladas</h3>
+              <label class="reading-source" for="reading-source">Origen de las lecturas
+                <select id="reading-source"><option value="simulation">Simulación</option><option value="serial">Arduino por serie</option></select>
+              </label>
+              <p class="model-note" id="reading-source-help">Enciende la bomba y abre la alimentación. Pulsa una pieza para localizarla.</p>
+              <details class="serial-settings"><summary>Conexión Arduino</summary>
+                <label for="serial-port">Puerto<select id="serial-port"><option value="">Buscando puertos…</option></select></label>
+                <label for="serial-baud">Velocidad (baudios)<select id="serial-baud"><option>9600</option><option>19200</option><option>38400</option><option>57600</option><option selected>115200</option></select></label>
+                <div class="serial-actions"><button id="serial-refresh" type="button">Buscar puertos</button><button id="serial-connect" type="button" disabled>Conectar</button><button id="serial-disconnect" type="button" disabled>Desconectar</button></div>
+                <p class="model-note">Cierra el monitor serie de Arduino antes de conectar. Abrir el puerto puede reiniciar la placa.</p>
+              </details>
+              <p id="serial-status" class="model-note" role="status">Arduino sin conectar.</p>
+              <dl>
+                <div><dt><button type="button" data-sensor-piece="103">103 · Presión</button></dt><dd id="sensor-reading-102">Sin estimación</dd><dd class="sensor-range" id="sensor-range-102"></dd></div>
+                <div><dt><button type="button" data-sensor-piece="106">106 · Presión</button></dt><dd id="sensor-reading-105">Sin estimación</dd><dd class="sensor-range" id="sensor-range-105"></dd></div>
+                <div><dt><button type="button" data-sensor-piece="136">136 · Flujo</button></dt><dd id="sensor-reading-135">Sin estimación</dd><dd class="sensor-range" id="sensor-range-135"></dd></div>
+                <div><dt><button type="button" data-sensor-piece="120">120 · Temperatura</button></dt><dd id="sensor-reading-119">Sin estimación</dd><dd class="sensor-range" id="sensor-range-119"></dd></div>
+              </dl>
+              <details class="thermal-settings"><summary>Escenario térmico supuesto</summary>
+                <label for="water-temperature">Temperatura de entrada (°C)<input id="water-temperature" type="number" min="0.1" max="99.9" step="0.1" value="20" /></label>
+                <label for="water-heat">Calor neto al agua antes del PT100 (W)<input id="water-heat" type="number" step="10" value="0" /></label>
+                <p class="model-note">0 W conserva la temperatura de entrada. Un valor positivo calienta y uno negativo enfría. Es un escenario de agua líquida entre 0 y 100 °C; no presupone un calentador instalado ni usa la potencia del motor como calor.</p>
+              </details>
+            </section>
+            <dl><div><dt>Caudal total estimado</dt><dd id="pump-flow">0,0 L/min</dd></div><div><dt>Δp de la bomba</dt><dd id="pump-pressure">0,00 bar</dd></div><div><dt>Presión estimada del aspersor</dt><dd id="spray-pressure">0,00 bar</dd></div><div><dt>Caudal al aspersor</dt><dd id="spray-flow">0,0 L/min</dd></div><div><dt>Descarga · llave 167</dt><dd id="bypass-flow">0,0 L/min</dd></div><div><dt>Estado de llave 167</dt><dd id="bypass-state">Abierta</dd></div><div><dt>Potencia hidráulica</dt><dd id="pump-hydraulic-power">0,000 kW</dd></div><div><dt>Referencia de eje por afinidad</dt><dd id="pump-shaft-reference">0,000 kW</dd></div></dl>
+            <p class="model-note">La referencia de eje es 1,1 × (f/50)³; no es consumo eléctrico medido. Los 1,1 kW permanecen como potencia nominal del motor.</p>
+            <svg id="pump-chart" viewBox="0 0 430 210" role="img" aria-label="Curva de la bomba en azul, curva supuesta del circuito en ocre y punto de trabajo estimado">
+              <path d="M42 20V170H398" class="chart-axis" /><text x="8" y="18">H (mca)</text><text x="15" y="174">0</text><text x="8" y="30">160</text><text x="38" y="190">0</text><text x="380" y="190">40</text><text x="300" y="207">Q (L/min)</text>
+              <polyline id="pump-curve" class="curve-pump" points="" /><polyline id="system-curve" class="curve-system" points="" /><circle id="pump-duty-point" r="5" cx="42" cy="170" />
+            </svg>
+            <div class="chart-legend"><span>Azul: bomba</span><span>Ocre: circuito supuesto</span><a href="https://wdmpumps.com/ar/bombas-multietapas-verticales-en-acero-inoxidable-vsse/" target="_blank" rel="noopener noreferrer">Curva WDM</a></div>
+          </div>
+        </div>
+        <p id="pump-status" role="status">Bomba apagada</p>
+      </fieldset>
+      </div>
+      <fieldset id="pieces-panel" disabled>
+        <label for="piece">Pieza</label>
+        <select id="piece"><option value="">Planta completa</option></select>
+        <output id="gauge-status" class="sr-only" aria-live="polite"></output>
+        <fieldset id="piece-controls" disabled>
+          <label class="isolate-label"><input id="isolate-piece" type="checkbox" checked /> Ver solo esta pieza</label>
+          <div class="position-fields">
+            <label for="piece-x">Mover X (m)<input id="piece-x" type="number" step="0.01" value="0" /></label>
+            <label for="piece-y">Mover Y (m)<input id="piece-y" type="number" step="0.01" value="0" /></label>
+            <label for="piece-z">Mover Z (m)<input id="piece-z" type="number" step="0.01" value="0" /></label>
+            <button id="reset-piece">Restablecer pieza</button>
+          </div>
+        </fieldset>
+        <button id="reset-pieces">Restablecer todas</button>
+        <p>Arrastra para girar la vista; usa el botón derecho para desplazarla. En móvil, un dedo gira y dos dedos desplazan o acercan. Selecciona una pieza y arrastra sus flechas para moverla.</p>
+      </fieldset>
+    </section>
+    <footer><span id="water-status" role="status">Comprobando unión de piezas…</span><span>Montaje propuesto · tambor recolocado y soporte ajustado · agua ilustrativa</span></footer>
+  </main>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

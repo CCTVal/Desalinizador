@@ -1,0 +1,57 @@
+{
+  "assemblyIds": [
+    82,
+    83,
+    84,
+    85,
+    86,
+    94,
+    95,
+    96,
+    97,
+    98,
+    99,
+    146,
+    209
+  ],
+  "rotationYDegrees": 180,
+  "translationM": [
+    -0.7289603203535078,
+    -0.026498086750507355,
+    -1.2240040376782417
+  ],
+  "supportLegShorteningM": 0.022998102009296417,
+  "portGapM": 5.551115123125783e-17,
+  "sourcePortM": [
+    -0.36775500327348704,
+    0.3347499966621399,
+    -0.08500201255083084
+  ],
+  "destinationPortM": [
+    -0.3677550032734871,
+    0.3347499966621399,
+    -0.08500201255083084
+  ],
+  "supportGroundClearanceM": 0,
+  "audit": {
+    "method": "Cajas envolventes contra piezas fijas; no es una validación de fabricación",
+    "interferences": [],
+    "opposedPortNormalsDot": -1,
+    "sourceTubeOuterDiameterMm": 9.294494986534119,
+    "targetTubeOuterDiameterMm": 9.285032749176025,
+    "supports": "Apoyo en suelo, contacto soporte-placa y placa-tambor verificados"
+  },
+  "note": "Montaje propuesto autorizado por el usuario: ajustar soporte. Uniones, materiales y sellado pendientes de validar con el montaje real.",
+  "flow": {
+    "lengthM": 6.533410467393406,
+    "finalOutletM": [
+      0.064254991710186,
+      0.3471899777650833,
+      1.2740579843521118
+    ],
+    "finalPipeVisibleId": 172,
+    "recipientVisibleId": 146,
+    "continuousAtElbows": true,
+    "endsInsideRecipientBounds": true
+  }
+}

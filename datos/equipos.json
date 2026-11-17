@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "fuente": "Especificaciones entregadas por el usuario",
+  "fecha_registro": "2026-11-12",
+  "verificacion_con_fabricante": "Parcial: curva de referencia WDM VSSE1-23 a 50 Hz verificada en el catálogo oficial; unidad instalada y resto de fichas pendientes",
+  "lecturas_reales_disponibles": false,
+  "equipos": [
+    {
+      "id": "bomba_principal",
+      "tipo": "bomba_vertical_multietapa",
+      "marca": "WDM",
+      "modelo": "VSSE 1-23",
+      "material_cuerpo": "Acero inoxidable 304",
+      "conexiones_mm": 32,
+      "motor": {
+        "potencia_declarada_kw": 1.1,
+        "potencia_declarada_hp": 1.5,
+        "tension_v": 380,
+        "frecuencia_hz": 50
+      },
+      "curva_referencia": "bomba-vsse1-23.json",
+      "piezas_cad_asociadas": [182, 183],
+      "asociacion_cad": "Provisional, IDs internos: alturas de cuerpo/motor compatibles con 643/241 mm del catálogo"
+    },
+    {
+      "id": "manometro",
+      "tipo": "manometro",
+      "nombre": "Manómetro analógico",
+      "indicacion": "analogica",
+      "diametro_declarado_mm": 100,
+      "conexion": "1/2 pulgada NPT",
+      "rango_declarado": { "min": 0, "max": 70, "unidad": "bar" },
+      "piezas_cad_asociadas": [71, 73],
+      "asociacion_cad": "Piezas 72 y 74 del visor (IDs internos 71 y 73), identificadas por el usuario como manómetros analógicos P23.00-00-0071"
+    },
+    {
+      "id": "sensor_temperatura",
+      "tipo": "PT100",
+      "nombre": "Sensor de temperatura PT100",
+      "hilos": 3,
+      "material_bulbo": "Acero inoxidable SS 316L",
+      "diametro_bulbo_mm": 6.35,
+      "rango_declarado": { "min": -50, "max": 250, "unidad": "°C" },
+      "piezas_cad_asociadas": [119],
+      "asociacion_cad": "Pieza 120 del visor (ID interno 119), identificada por el usuario como sensor de temperatura; asociada al PT100 registrado"
+    },
+    {
+      "id": "sensor_presion",
+      "tipo": "sensor_presion",
+      "nombre": "Sensor de presión Volltell EPT1000",
+      "clasificacion_usuario": "Sensor digital de presión",
+      "marca": "Volltell",
+      "modelo": "EPT1000",
+      "rango_declarado": { "min": 0, "max": 100, "unidad": "bar" },
+      "piezas_cad_asociadas": [102, 105],
+      "asociacion_cad": "Piezas 103 y 106 del visor (IDs internos 102 y 105), confirmadas por el usuario como sensores de presión Volltell EPT1000"
+    },
+    {
+      "id": "sensor_flujo",
+      "tipo": "sensor_flujo",
+      "nombre": "Sensor de flujo de agua",
+      "rango_declarado": { "min": 10, "max": 100, "unidad": "L/min" },
+      "piezas_cad_asociadas": [135],
+      "asociacion_cad": "Pieza 136 del visor (ID interno 135), confirmada por el usuario como sensor de flujo de agua"
+    },
+    {
+      "id": "ventilador_grande",
+      "tipo": "ventilador",
+      "modelo": "TD 1000/200 Silent 3V",
+      "potencia_absorbida_maxima_w": 130,
+      "potencia_absorbida_en_minimo_declarada_w": 120,
+      "intensidad_absorbida_maxima_a": 0.55,
+      "piezas_cad_asociadas": []
+    }
+  ],
+  "pendientes_para_simulacion": [
+    "Confirmar la curva de referencia VSSE1-23 de 50 Hz con la unidad instalada y completar rendimiento, potencia de eje y condiciones de funcionamiento",
+    "Volumen, geometría interior y nivel inicial del tambor",
+    "Diámetros interiores, longitudes y cotas del circuito",
+    "Características de válvulas y accesorios",
+    "Asignación de equipos e instrumentos a las piezas del CAD",
+    "Tipo de señal, adquisición y calibración de cada sensor",
+    "Límites de operación y alarmas definidos para la planta"
+  ]
+}

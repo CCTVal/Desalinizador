@@ -1,0 +1,19 @@
+{
+  "calibrado": false,
+  "referencia": "Escenario estacionario: agua líquida, pérdidas repartidas por longitud y velocidad equivalente en las tomas. Cotas aproximadas de los centros CAD, no levantamiento de las tomas.",
+  "temperaturaEntradaC": 20,
+  "calorAlAguaW": 0,
+  "calorEspecificoJKgK": 4180,
+  "salidaAspersorCotaM": 1.4159,
+  "subidaInicioCotaM": -0.2188,
+  "colectorCotaM": 1.458,
+  "colectorLongitudM": 1.528,
+  "tomas": {
+    "71": { "cotaM": 1.2045 },
+    "73": { "cotaM": 0.336709663 },
+    "102": { "cotaM": 0.163448706 },
+    "105": { "cotaM": 1.051239074 }
+  },
+  "caudal": { "pieza": 136, "ramal": "común, antes del aspersor" },
+  "temperatura": { "pieza": 120, "ramal": "común, antes del aspersor" }
+}

@@ -1,0 +1,44 @@
+{
+  "model": "WDM VSSE 1-23",
+  "reference": "1G0220",
+  "nominalFrequencyHz": 50,
+  "nominalMotorPowerKw": 1.1,
+  "voltageV": 380,
+  "connectionsDnMm": 32,
+  "curve50Hz": [
+    [0.4, 135], [0.6, 132.5], [0.8, 130], [1.0, 126], [1.2, 122],
+    [1.4, 117], [1.6, 111], [1.8, 104], [2.0, 94], [2.2, 80]
+  ],
+  "curveUnits": { "flow": "m³/h", "head": "mca" },
+  "curveSource": {
+    "publisher": "WDM Pumps Argentina",
+    "url": "https://wdmpumps.com/ar/bombas-multietapas-verticales-en-acero-inoxidable-vsse/",
+    "catalogUrl": "https://wdmpumps.com/ar/wp-content/uploads/2023/01/Catalogo-VSSE-Multietapa-20-01-23.pdf",
+    "pdfPage": 14,
+    "verifiedDate": "2026-11-12"
+  },
+  "affinitySource": "https://www.ksb.com/en-global/centrifugal-pump-lexicon/article/pump-affinity-laws-1117584",
+  "assumptions": {
+    "waterDensityKgM3": 1000,
+    "gravityMS2": 9.81,
+    "defaultStaticHeadM": 1,
+    "defaultLossHeadAt1M3h": 40,
+    "valveLossCoefficient": 20,
+    "sprayCircuit": {
+      "commonLossFraction": 0.25,
+      "nozzleResistanceMPerM3hSquared": 270,
+      "bypassResistanceMPerM3hSquared": 67.5,
+      "bypassOutletDropM": 1.6222,
+      "calibrated": false
+    },
+    "frequencyControlsSpeedProportionally": true,
+    "variableFrequencyDriveIsSimulated": true,
+    "networkCalibrated": false,
+    "noExtrapolationBeyondPublishedCurve": true
+  },
+  "cadAssociation": {
+    "pumpBodyInternalId": 182,
+    "motorInternalId": 183,
+    "status": "Provisional: las alturas CAD de 643 mm y 241 mm coinciden con B1/B2 del catálogo; identificación de montaje pendiente de confirmar"
+  }
+}
